@@ -26,8 +26,14 @@ Hauptmenü (Kurzüberblick)
 - `2` Arbeitsende erfassen (jetzt)
 - `3` Zeitsaldo anzeigen
 - `4` Report als PDF erstellen
-- `5` Einstellungen / Optionen (Urlaub, Feiertag, Korrekturen, Import, Backup)
-- `6` Beenden
+ - `1` Arbeitsbeginn erfassen (jetzt)
+ - `2` Arbeitsende erfassen (jetzt)
+ - `3` Zeitsaldo anzeigen
+ - `4` Report als PDF erstellen
+ - `5` Arbeitsbeginn korrigieren (korrigieren / nachtragen)
+ - `6` Arbeitsende korrigieren (korrigieren / nachtragen)
+ - `7` Einstellungen / Optionen (Urlaub, Feiertag, Korrekturen, Import, Backup)
+ - `8` Beenden
 
 Einstellungen / Optionen (im Untermenü)
 
@@ -41,6 +47,11 @@ Einstellungen / Optionen (im Untermenü)
 - `8` Config-Backup wiederherstellen
 - `9` Name ändern
 - `0` Zurück
+
+Hinweis zu Korrekturen
+
+- Bei den Korrektur-Optionen kannst du das Datum im Format `TT.MM.JJJJ` eingeben.
+- Lässt du die Datumseingabe leer, wird automatisch das aktuelle Datum vorausgefüllt.
 
 Wichtige Hinweise
 

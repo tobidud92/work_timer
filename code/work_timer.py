@@ -741,10 +741,22 @@ def add_special_work_day():
     print(f"Sonderarbeit für {date_display} erfasst.")
 
 def edit_work_start():
-    data          = load_data()
-    date_internal = input_date("Datum des zu korrigierenden Arbeitsbeginns")
-    date_display  = to_display(date_internal)
-    entry         = get_entry_by_date(data, date_internal)
+    data = load_data()
+    today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
+    today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
+    prompt = f"Datum des zu korrigierenden Arbeitsbeginns (TT.MM.JJJJ) [{today_display}]: "
+    while True:
+        date_input = input(prompt).strip()
+        if not date_input:
+            date_internal = today_internal
+            break
+        internal = to_internal(date_input)
+        if internal:
+            date_internal = internal
+            break
+        print("Ungültiges Datumsformat. Bitte TT.MM.JJJJ oder leer für heute.")
+    date_display = to_display(date_internal)
+    entry = get_entry_by_date(data, date_internal)
 
     if not entry:
         print(f"Kein Eintrag für {date_display} gefunden.")
@@ -782,10 +794,22 @@ def edit_work_start():
         print("Keine Änderung vorgenommen.")
 
 def edit_work_end():
-    data          = load_data()
-    date_internal = input_date("Datum des zu korrigierenden Arbeitsendes")
-    date_display  = to_display(date_internal)
-    entry         = get_entry_by_date(data, date_internal)
+    data = load_data()
+    today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
+    today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
+    prompt = f"Datum des zu korrigierenden Arbeitsendes (TT.MM.JJJJ) [{today_display}]: "
+    while True:
+        date_input = input(prompt).strip()
+        if not date_input:
+            date_internal = today_internal
+            break
+        internal = to_internal(date_input)
+        if internal:
+            date_internal = internal
+            break
+        print("Ungültiges Datumsformat. Bitte TT.MM.JJJJ oder leer für heute.")
+    date_display = to_display(date_internal)
+    entry = get_entry_by_date(data, date_internal)
 
     if not entry:
         print(f"Kein Eintrag für {date_display} gefunden. Bitte zuerst Arbeitsbeginn erfassen.")
@@ -1252,11 +1276,13 @@ def main_menu():
     print("2. Arbeitsende erfassen (jetzt)")
     print("3. Zeitsaldo anzeigen")
     print("4. Report als PDF erstellen")
-    print("5. Einstellungen / Optionen")
-    print("6. Beenden")
+    print("5. Arbeitsbeginn korrigieren")
+    print("6. Arbeitsende korrigieren")
+    print("7. Einstellungen / Optionen")
+    print("8. Beenden")
     print("-" * 40)
 
-    choice = input("Wähle eine Option (1-6): ")
+    choice = input("Wähle eine Option (1-8): ")
 
     if choice == '1':
         start_work()
@@ -1267,8 +1293,12 @@ def main_menu():
     elif choice == '4':
         generate_pdf_report()
     elif choice == '5':
-        settings_menu()
+        edit_work_start()
     elif choice == '6':
+        edit_work_end()
+    elif choice == '7':
+        settings_menu()
+    elif choice == '8':
         print("Auf Wiedersehen!")
         return False
     else:

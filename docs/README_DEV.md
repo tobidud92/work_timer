@@ -28,6 +28,11 @@ This document explains the internals of `work_timer.py`, configuration layout an
 - The CLI uses a centralized `ask_yes()` helper for yes/no prompts. It accepts `j` (Deutsch) or `y` (English).
 - The main menu header is rendered via `print_header()` which shows the configured user name if present.
 
+Corrections (Korrekturen)
+
+- The main menu now exposes direct options to correct start and end times (`Arbeitsbeginn korrigieren`, `Arbeitsende korrigieren`).
+- Correction prompts accept dates in `TT.MM.JJJJ`. If the user leaves the date input empty, the application will use the current date as default.
+
 ## Holiday handling
 
 - `PUBLIC_HOLIDAYS` is computed by `get_public_holidays(start_year, years)` using an Easter algorithm and a set of fixed-date holidays.
