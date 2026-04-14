@@ -32,6 +32,10 @@ Corrections (Korrekturen)
 
 - The main menu now exposes direct options to correct start and end times (`Arbeitsbeginn korrigieren`, `Arbeitsende korrigieren`).
 - Correction prompts accept dates in `TT.MM.JJJJ`. If the user leaves the date input empty, the application will use the current date as default.
+ - In the interactive date prompt Up/Down arrow keys navigate the date:
+   - `Up` → previous day (scroll backwards)
+   - `Down` → next day (scroll forwards)
+ - Left/Right arrows behave normally and move the text cursor so you can edit the date manually.
 
 ## Holiday handling
 

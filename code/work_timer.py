@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timedelta, date
 import os
 import shutil
+import sys
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet
@@ -250,6 +251,63 @@ def get_public_holidays(start_year=None, years=10):
     return holidays
 
 PUBLIC_HOLIDAYS = get_public_holidays()
+
+# Optional interactive date picker using prompt_toolkit (arrow keys)
+try:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.key_binding import KeyBindings
+    HAVE_PROMPT_TOOLKIT = True
+except Exception:
+    HAVE_PROMPT_TOOLKIT = False
+
+
+def date_input_with_arrows(prompt_text, default_internal):
+    """Prompt for a date with the default prefilled. If `prompt_toolkit` is
+    available, allow the user to use Up/Down arrows to increase/decrease the
+    date. Returns an internal date string (YYYY-MM-DD).
+    """
+    default_display = to_display(default_internal)
+    if HAVE_PROMPT_TOOLKIT and sys.stdin.isatty():
+        session = PromptSession()
+        kb = KeyBindings()
+        try:
+            current = datetime.strptime(default_internal, DATE_FORMAT_INTERNAL).date()
+        except Exception:
+            current = date.today()
+
+        @kb.add('up')
+        def _go_previous_day(event):
+            # Up arrow: go to previous day (scroll backwards)
+            nonlocal current
+            current = current - timedelta(days=1)
+            event.app.current_buffer.text = current.strftime(DATE_FORMAT_DISPLAY)
+
+        @kb.add('down')
+        def _go_next_day(event):
+            # Down arrow: go to next day (scroll forwards)
+            nonlocal current
+            current = current + timedelta(days=1)
+            event.app.current_buffer.text = current.strftime(DATE_FORMAT_DISPLAY)
+
+        while True:
+            try:
+                text = session.prompt(prompt_text, default=default_display, key_bindings=kb)
+            except KeyboardInterrupt:
+                raise
+            internal = to_internal(text)
+            if internal:
+                return internal
+            print("Ungültiges Datumsformat. Bitte TT.MM.JJJJ.")
+    else:
+        # Fallback: simple input with default shown in brackets
+        while True:
+            date_input = input(f"{prompt_text} [{default_display}]: ").strip()
+            if not date_input:
+                return default_internal
+            internal = to_internal(date_input)
+            if internal:
+                return internal
+            print("Ungültiges Datumsformat. Bitte TT.MM.JJJJ oder leer für heute.")
 
 # --- Hilfsfunktionen ---
 
@@ -743,18 +801,7 @@ def add_special_work_day():
 def edit_work_start():
     data = load_data()
     today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
-    today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
-    prompt = f"Datum des zu korrigierenden Arbeitsbeginns (TT.MM.JJJJ) [{today_display}]: "
-    while True:
-        date_input = input(prompt).strip()
-        if not date_input:
-            date_internal = today_internal
-            break
-        internal = to_internal(date_input)
-        if internal:
-            date_internal = internal
-            break
-        print("Ungültiges Datumsformat. Bitte TT.MM.JJJJ oder leer für heute.")
+    date_internal = date_input_with_arrows("Datum des zu korrigierenden Arbeitsbeginns", today_internal)
     date_display = to_display(date_internal)
     entry = get_entry_by_date(data, date_internal)
 
@@ -796,18 +843,7 @@ def edit_work_start():
 def edit_work_end():
     data = load_data()
     today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
-    today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
-    prompt = f"Datum des zu korrigierenden Arbeitsendes (TT.MM.JJJJ) [{today_display}]: "
-    while True:
-        date_input = input(prompt).strip()
-        if not date_input:
-            date_internal = today_internal
-            break
-        internal = to_internal(date_input)
-        if internal:
-            date_internal = internal
-            break
-        print("Ungültiges Datumsformat. Bitte TT.MM.JJJJ oder leer für heute.")
+    date_internal = date_input_with_arrows("Datum des zu korrigierenden Arbeitsendes", today_internal)
     date_display = to_display(date_internal)
     entry = get_entry_by_date(data, date_internal)
 
