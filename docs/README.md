@@ -9,7 +9,7 @@ Installation
 ```powershell
 python -m venv .venv
 & .venv\Scripts\Activate.ps1
-pip install reportlab
+pip install -r requirements.txt
 ```
 
 Start
