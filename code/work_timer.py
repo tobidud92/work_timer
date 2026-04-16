@@ -16,6 +16,16 @@ try:
 except Exception:
     _prompt = None
     HAVE_PROMPT_TOOLKIT = False
+
+# Allow forcing prompt_toolkit usage via environment variable (useful in packaged runs)
+if os.environ.get('FORCE_PROMPT_TOOLKIT') == '1':
+    if not HAVE_PROMPT_TOOLKIT:
+        try:
+            from prompt_toolkit import shortcuts as _shortcuts_force
+            _prompt = _shortcuts_force.prompt
+            HAVE_PROMPT_TOOLKIT = True
+        except Exception:
+            print('WARNING: FORCE_PROMPT_TOOLKIT set but prompt_toolkit is not importable.')
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet
@@ -793,17 +803,8 @@ def edit_work_start():
     data = load_data()
     today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
     today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
-    prompt = f"Datum des zu korrigierenden Arbeitsbeginns (TT.MM.JJJJ) [{today_display}]: "
-    while True:
-        date_input = input(prompt).strip()
-        if not date_input:
-            date_internal = today_internal
-            break
-        internal = to_internal(date_input)
-        if internal:
-            date_internal = internal
-            break
-        print("Ungültiges Datumsformat. Bitte TT.MM.JJJJ oder leer für heute.")
+    # Use the central input_date helper so prompt_toolkit (if available) is used
+    date_internal = input_date("Datum des zu korrigierenden Arbeitsbeginns")
     date_display = to_display(date_internal)
     entry = get_entry_by_date(data, date_internal)
 
@@ -846,17 +847,8 @@ def edit_work_end():
     data = load_data()
     today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
     today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
-    prompt = f"Datum des zu korrigierenden Arbeitsendes (TT.MM.JJJJ) [{today_display}]: "
-    while True:
-        date_input = input(prompt).strip()
-        if not date_input:
-            date_internal = today_internal
-            break
-        internal = to_internal(date_input)
-        if internal:
-            date_internal = internal
-            break
-        print("Ungültiges Datumsformat. Bitte TT.MM.JJJJ oder leer für heute.")
+    # Use the central input_date helper so prompt_toolkit (if available) is used
+    date_internal = input_date("Datum des zu korrigierenden Arbeitsendes")
     date_display = to_display(date_internal)
     entry = get_entry_by_date(data, date_internal)
 
