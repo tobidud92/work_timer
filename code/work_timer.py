@@ -225,7 +225,40 @@ def input_date(prompt):
         # use prompt_toolkit if available; tests can monkeypatch _prompt
         if _prompt:
             try:
-                date_str = _prompt(full_prompt, default=today_display)
+                # try to provide arrow-key Up/Down to change the date if prompt_toolkit supports key bindings
+                try:
+                    from prompt_toolkit.key_binding import KeyBindings
+                    from prompt_toolkit.document import Document
+                except Exception:
+                    KeyBindings = None
+
+                if KeyBindings:
+                    kb = KeyBindings()
+
+                    def _adjust_buffer(buf, new_text):
+                        try:
+                            # set_document is available on buffers
+                            buf.set_document(Document(new_text, cursor_position=len(new_text)), bypass_undo=True)
+                        except Exception:
+                            buf.text = new_text
+
+                    @kb.add('up')
+                    def _(_event):
+                        buf = _event.current_buffer
+                        cur = buf.text.strip() or today_display
+                        new = adjust_date_display(cur, -1)
+                        _adjust_buffer(buf, new)
+
+                    @kb.add('down')
+                    def _(_event):
+                        buf = _event.current_buffer
+                        cur = buf.text.strip() or today_display
+                        new = adjust_date_display(cur, 1)
+                        _adjust_buffer(buf, new)
+
+                    date_str = _prompt(full_prompt, default=today_display, key_bindings=kb)
+                else:
+                    date_str = _prompt(full_prompt, default=today_display)
             except Exception:
                 date_str = input(full_prompt)
         else:
@@ -261,6 +294,23 @@ def input_time(prompt: str, default: Optional[str] = None) -> str:
             return s
         except ValueError:
             print("Ungültiges Zeitformat. Bitte HH:MM eingeben.")
+
+
+def adjust_date_display(date_display: str, delta_days: int) -> str:
+    """Return a display-format date string shifted by delta_days.
+
+    If the input is empty or invalid, treat it as today.
+    """
+    if not date_display:
+        d = date.today()
+    else:
+        try:
+            d = datetime.strptime(date_display, DATE_FORMAT_DISPLAY).date()
+        except Exception:
+            # fallback to today
+            d = date.today()
+    d = d + timedelta(days=delta_days)
+    return d.strftime(DATE_FORMAT_DISPLAY)
 
 # --- Feiertage Bayern / Erlangen 2026–2031 ---
 
