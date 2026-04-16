@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+
+# PyInstaller
+dist/
+build/
+*.spec
+
+# Editor/OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and temporary
+*.log
+tmp/
+temp/
+
+# Test/build artifacts
+*.egg-info/
+.pytest_cache/

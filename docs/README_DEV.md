@@ -28,6 +28,35 @@ This document explains the internals of `work_timer.py`, configuration layout an
 - The CLI uses a centralized `ask_yes()` helper for yes/no prompts. It accepts `j` (Deutsch) or `y` (English).
 - The main menu header is rendered via `print_header()` which shows the configured user name if present.
 
+Interactive date & time picker
+
+- The project provides an interactive date picker (`date_input_with_arrows`) and
+  a time picker (`time_input_with_arrows`) that use `prompt_toolkit` when
+  available. Behaviour:
+  - Date picker: `Up` → previous day, `Down` → next day. `Left`/`Right` move the cursor for manual edits.
+  - Time picker: `Up`/`Down` change the minutes (step = 1 minute by default). `Left`/`Right` move the cursor.
+  - Both have a text-mode fallback that shows the default value in brackets.
+
+Packaging notes regarding prompt_toolkit
+
+- Build the exe from a virtualenv where `prompt_toolkit` is installed so PyInstaller
+  can detect and include its submodules. We also include a PyInstaller hook in
+  `code/pyinstaller-hooks/hook-prompt_toolkit.py` to help collect required submodules.
+- Example build command:
+
+```powershell
+& .venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+pyinstaller --onefile --console --additional-hooks-dir=code\pyinstaller-hooks code\work_timer.py
+```
+
+Runtime feature flags
+
+- `FORCE_PROMPT_TOOLKIT=1` forces the code path that uses `prompt_toolkit` even
+  if `sys.stdin.isatty()` is False (useful in some packaged scenarios).
+- `DEBUG_DATEPICKER=1` prints debug information about prompt_toolkit detection.
+- `SUPPRESS_CONFIRMATION=1` or `--no-confirm` disables messagebox confirmations for automation.
+
 Corrections (Korrekturen)
 
 - The main menu now exposes direct options to correct start and end times (`Arbeitsbeginn korrigieren`, `Arbeitsende korrigieren`).
@@ -36,6 +65,29 @@ Corrections (Korrekturen)
    - `Up` → previous day (scroll backwards)
    - `Down` → next day (scroll forwards)
  - Left/Right arrows behave normally and move the text cursor so you can edit the date manually.
+
+Packaging and interactive prompt notes
+
+- The interactive date picker uses `prompt_toolkit`. To include it in a
+  PyInstaller-built exe, build from a Python environment that has
+  `prompt_toolkit` installed (e.g. via `pip install -r requirements.txt`).
+- Example build command that includes the repository hooks directory we
+  provided to help PyInstaller collect prompt_toolkit submodules:
+
+```powershell
+& .venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+pyinstaller --onefile --console --additional-hooks-dir=code\pyinstaller-hooks code\work_timer.py
+```
+
+- Debugging: set environment variables before running the exe to force
+  or inspect the date picker behavior:
+
+```powershell
+$env:FORCE_PROMPT_TOOLKIT = '1'   # force use of prompt_toolkit
+$env:DEBUG_DATEPICKER = '1'      # print runtime debug info about picker
+.\dist\work_timer.exe
+```
 
 ## Holiday handling
 

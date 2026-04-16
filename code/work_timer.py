@@ -3,6 +3,19 @@ import json
 from datetime import datetime, timedelta, date
 import os
 import shutil
+import sys
+from typing import Optional
+
+# Optional interactive prompt support (prompt_toolkit)
+_prompt = None
+HAVE_PROMPT_TOOLKIT = False
+try:
+    from prompt_toolkit import shortcuts
+    _prompt = shortcuts.prompt
+    HAVE_PROMPT_TOOLKIT = True
+except Exception:
+    _prompt = None
+    HAVE_PROMPT_TOOLKIT = False
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet
@@ -196,12 +209,48 @@ def to_internal(date_str_display):
         return None
 
 def input_date(prompt):
+    today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
+    full_prompt = prompt + f" (TT.MM.JJJJ, z.B. {today_display}): "
     while True:
-        date_str = input(prompt + " (TT.MM.JJJJ, z.B. 08.04.2026): ")
+        # use prompt_toolkit if available; tests can monkeypatch _prompt
+        if _prompt:
+            try:
+                date_str = _prompt(full_prompt, default=today_display)
+            except Exception:
+                date_str = input(full_prompt)
+        else:
+            date_str = input(full_prompt)
+
+        date_str = date_str.strip()
+        if not date_str:
+            date_str = today_display
         internal = to_internal(date_str)
         if internal:
             return internal
         print("Ungültiges Datumsformat. Bitte verwende TT.MM.JJJJ.")
+
+
+def input_time(prompt: str, default: Optional[str] = None) -> str:
+    """Prompt for a time 'HH:MM'. Uses prompt_toolkit if available; returns validated time string."""
+    if default is None:
+        default = datetime.now().strftime(TIME_FORMAT)
+    full_prompt = prompt + f" (HH:MM) [{default}]: "
+    while True:
+        if _prompt:
+            try:
+                s = _prompt(full_prompt, default=default)
+            except Exception:
+                s = input(full_prompt)
+        else:
+            s = input(full_prompt)
+        s = s.strip()
+        if not s:
+            s = default
+        try:
+            datetime.strptime(s, TIME_FORMAT)
+            return s
+        except ValueError:
+            print("Ungültiges Zeitformat. Bitte HH:MM eingeben.")
 
 # --- Feiertage Bayern / Erlangen 2026–2031 ---
 
@@ -700,7 +749,7 @@ def add_special_work_day():
             return
 
     while True:
-        start_str = input(f"Startzeit für {date_display} (HH:MM): ")
+        start_str = input_time(f"Startzeit für {date_display}")
         try:
             datetime.strptime(start_str, TIME_FORMAT)
             break
@@ -708,7 +757,7 @@ def add_special_work_day():
             print("Ungültiges Zeitformat.")
 
     while True:
-        end_str = input(f"Endzeit für {date_display} (HH:MM): ")
+        end_str = input_time(f"Endzeit für {date_display}")
         try:
             datetime.strptime(end_str, TIME_FORMAT)
             break
@@ -780,7 +829,7 @@ def edit_work_start():
         entry['Kommentar'] = ''
 
     print(f"Aktueller Arbeitsbeginn für {date_display}: {entry.get('Startzeit', 'nicht gesetzt')} Uhr")
-    new_start = input("Neue Startzeit (HH:MM, leer = keine Änderung): ")
+    new_start = input_time("Neue Startzeit (HH:MM, leer = keine Änderung)")
     if new_start:
         try:
             datetime.strptime(new_start, TIME_FORMAT)
@@ -825,7 +874,7 @@ def edit_work_end():
         return
 
     print(f"Aktuelles Arbeitsende für {date_display}: {entry.get('Endzeit', 'nicht gesetzt')} Uhr")
-    new_end = input("Neues Arbeitsende (HH:MM, leer = keine Änderung): ")
+    new_end = input_time("Neues Arbeitsende (HH:MM, leer = keine Änderung)")
     if new_end:
         try:
             datetime.strptime(new_end, TIME_FORMAT)
@@ -1357,6 +1406,23 @@ if __name__ == "__main__":
     ensure_user_name()
     # ensure manual holidays are present in config.json (single source of truth)
     ensure_holidays_in_config()
+
+    # Support quick desktop shortcuts that call the exe with --start-now / --end-now
+    # These should perform the action immediately and exit without showing the menu.
+    import argparse
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--start-now', action='store_true', help='Record start time now and exit')
+    parser.add_argument('--end-now', action='store_true', help='Record end time now and exit')
+    args, _ = parser.parse_known_args()
+
+    if args.start_now:
+        start_work()
+        sys.exit(0)
+    if args.end_now:
+        end_work()
+        sys.exit(0)
+
     running = True
     while running:
         running = main_menu()
