@@ -22,9 +22,11 @@ if not exist "%DEST%" (
 
 echo Checking required files in the installer folder...
 if not exist "%SRC%work_timer.exe" (
-    echo ERROR: work_timer.exe not found in %SRC%
-    pause
-    exit /b 1
+    if not exist "%SRC%dist\work_timer.exe" (
+        echo ERROR: work_timer.exe not found in %SRC% or %SRC%dist\
+        pause
+        exit /b 1
+    )
 )
 if not exist "%SRC%Kommen.ico" (
     echo ERROR: Kommen.ico not found in %SRC%
@@ -52,6 +54,16 @@ if exist "%SRC%dist\work_timer.exe" (
 copy /Y "%SRC%Kommen.ico" "%DEST%\" >nul
 copy /Y "%SRC%Gehen.ico" "%DEST%\" >nul
 copy /Y "%SRC%WorkTimer.ico" "%DEST%\" >nul
+rem Prefer canonical .ico files from repo data folder if present (when installer run from code/)
+if exist "%SRC%..\data\Kommen.ico" (
+    copy /Y "%SRC%..\data\Kommen.ico" "%DEST%" >nul
+)
+if exist "%SRC%..\data\Gehen.ico" (
+    copy /Y "%SRC%..\data\Gehen.ico" "%DEST%" >nul
+)
+if exist "%SRC%..\data\WorkTimer.ico" (
+    copy /Y "%SRC%..\data\WorkTimer.ico" "%DEST%" >nul
+)
 
 rem Create small wrapper batch files that call the EXE and log stdout/stderr to Desktop
 (echo @echo off) > "%DEST%\kommen.bat"
@@ -62,6 +74,13 @@ rem Create small wrapper batch files that call the EXE and log stdout/stderr to 
 (echo "%DEST%\work_timer.exe" --end-now ^>^> "%USERPROFILE%\Desktop\work_timer_gehen_log.txt" 2^>^&1) >> "%DEST%\gehen.bat"
 (echo exit /b) >> "%DEST%\gehen.bat"
 
+rem Create VBS wrappers to run the exe without showing a console window
+echo Set WshShell = CreateObject("WScript.Shell") > "%DEST%\kommen.vbs"
+echo WshShell.Run Chr(34) ^& "%DEST%\work_timer.exe" ^& Chr(34) ^& " --start-now", 0, False >> "%DEST%\kommen.vbs"
+
+echo Set WshShell = CreateObject("WScript.Shell") > "%DEST%\gehen.vbs"
+echo WshShell.Run Chr(34) ^& "%DEST%\work_timer.exe" ^& Chr(34) ^& " --end-now", 0, False >> "%DEST%\gehen.vbs"
+
 echo Creating desktop shortcuts...
 
 rem Create a temporary PowerShell script to reliably create shortcuts with icon paths
@@ -71,44 +90,26 @@ echo $desktop = [Environment]::GetFolderPath('Desktop') >> "%PSFILE%"
 echo $w = New-Object -ComObject WScript.Shell >> "%PSFILE%"
 
 echo $icon = Join-Path $d 'Kommen.ico' >> "%PSFILE%"
-echo # validate icon file header (ICO files start with 00 00 01 00) >> "%PSFILE%"
-echo $useIcon = $icon >> "%PSFILE%"
-echo if (Test-Path $icon) { >> "%PSFILE%"
-echo   try { $b = Get-Content $icon -Encoding Byte -TotalCount 4 } catch { $b = @() } >> "%PSFILE%"
-echo   if ($b.Length -ge 4 -and $b[0] -eq 0 -and $b[1] -eq 0 -and $b[2] -eq 1 -and $b[3] -eq 0) { } else { $useIcon = Join-Path $d 'work_timer.exe' } >> "%PSFILE%"
-echo } else { $useIcon = Join-Path $d 'work_timer.exe' } >> "%PSFILE%"
 echo $s = $w.CreateShortcut((Join-Path $desktop 'Kommen.lnk')) >> "%PSFILE%"
-echo $s.TargetPath = Join-Path $d 'work_timer.exe' >> "%PSFILE%"
-echo $s.Arguments = '--start-now' >> "%PSFILE%"
-echo $s.IconLocation = $useIcon + ',0' >> "%PSFILE%"
+echo $s.TargetPath = Join-Path $d 'kommen.vbs' >> "%PSFILE%"
+echo $s.Arguments = '' >> "%PSFILE%"
+echo $s.IconLocation = $icon + ',0' >> "%PSFILE%"
 echo $s.WorkingDirectory = $d >> "%PSFILE%"
 echo $s.Save() >> "%PSFILE%"
 
 echo $icon = Join-Path $d 'Gehen.ico' >> "%PSFILE%"
-echo # validate icon file header (ICO files start with 00 00 01 00) >> "%PSFILE%"
-echo $useIcon = $icon >> "%PSFILE%"
-echo if (Test-Path $icon) { >> "%PSFILE%"
-echo   try { $b = Get-Content $icon -Encoding Byte -TotalCount 4 } catch { $b = @() } >> "%PSFILE%"
-echo   if ($b.Length -ge 4 -and $b[0] -eq 0 -and $b[1] -eq 0 -and $b[2] -eq 1 -and $b[3] -eq 0) { } else { $useIcon = Join-Path $d 'work_timer.exe' } >> "%PSFILE%"
-echo } else { $useIcon = Join-Path $d 'work_timer.exe' } >> "%PSFILE%"
 echo $s = $w.CreateShortcut((Join-Path $desktop 'Gehen.lnk')) >> "%PSFILE%"
-echo $s.TargetPath = Join-Path $d 'work_timer.exe' >> "%PSFILE%"
-echo $s.Arguments = '--end-now' >> "%PSFILE%"
-echo $s.IconLocation = $useIcon + ',0' >> "%PSFILE%"
+echo $s.TargetPath = Join-Path $d 'gehen.vbs' >> "%PSFILE%"
+echo $s.Arguments = '' >> "%PSFILE%"
+echo $s.IconLocation = $icon + ',0' >> "%PSFILE%"
 echo $s.WorkingDirectory = $d >> "%PSFILE%"
 echo $s.Save() >> "%PSFILE%"
 
 echo $icon = Join-Path $d 'WorkTimer.ico' >> "%PSFILE%"
-echo # validate icon file header (ICO files start with 00 00 01 00) >> "%PSFILE%"
-echo $useIcon = $icon >> "%PSFILE%"
-echo if (Test-Path $icon) { >> "%PSFILE%"
-echo   try { $b = Get-Content $icon -Encoding Byte -TotalCount 4 } catch { $b = @() } >> "%PSFILE%"
-echo   if ($b.Length -ge 4 -and $b[0] -eq 0 -and $b[1] -eq 0 -and $b[2] -eq 1 -and $b[3] -eq 0) { } else { $useIcon = Join-Path $d 'work_timer.exe' } >> "%PSFILE%"
-echo } else { $useIcon = Join-Path $d 'work_timer.exe' } >> "%PSFILE%"
 echo $s = $w.CreateShortcut((Join-Path $desktop 'WorkTimer.lnk')) >> "%PSFILE%"
 echo $s.TargetPath = Join-Path $d 'work_timer.exe' >> "%PSFILE%"
 echo $s.Arguments = '' >> "%PSFILE%"
-echo $s.IconLocation = $useIcon + ',0' >> "%PSFILE%"
+echo $s.IconLocation = $icon + ',0' >> "%PSFILE%"
 echo $s.WorkingDirectory = $d >> "%PSFILE%"
 echo $s.Save() >> "%PSFILE%"
 

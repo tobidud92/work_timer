@@ -54,6 +54,7 @@ Interaktive Datums- und Zeiteingabe
 
 - Wenn `prompt_toolkit` installiert ist, zeigt die Datumseingabe eine interaktive Maske an, in der `Up`/`Down` das Datum ändert und `Left`/`Right` den Cursor bewegt. Ohne `prompt_toolkit` wird ein einfacher Eingabeprompt mit einem vorausgefüllten Datum angezeigt.
 - Zeit-Eingaben (Format `HH:MM`) werden standardmäßig mit der aktuellen Zeit vorausgefüllt. Bei installiertem `prompt_toolkit` lassen sich Minuten per `Up`/`Down` anpassen.
+ - Lässt du die Datumseingabe leer, wird standardmäßig das aktuelle Datum verwendet.
 
 Quick‑Shortcuts (Desktop)
 

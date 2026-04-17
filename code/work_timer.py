@@ -277,82 +277,82 @@ def input_date(prompt):
         print("Ungültiges Datumsformat. Bitte verwende TT.MM.JJJJ.")
 
 
-        def _show_messagebox(title: str, message: str):
-            """Show a Windows message box (works in packaged exe too).
+def _show_messagebox(title: str, message: str):
+    """Show a Windows message box (works in packaged exe too).
 
-            Falls nicht unter Windows oder MessageBox nicht verfügbar, fällt es auf print zurück.
-            """
-            try:
-                import ctypes
-                ctypes.windll.user32.MessageBoxW(0, str(message), str(title), 0)
-            except Exception:
-                try:
-                    print(f"{title}: {message}")
-                except Exception:
-                    pass
-
-
-        def _get_last_checkout_time(data):
-            """Return a tuple (date_display, time_str) of the most recent Endzeit found, or (None, None)."""
-            for entry in reversed(data):
-                et = entry.get('Endzeit')
-                if et:
-                    return (to_display(entry.get('Datum', '')), et)
-            return (None, None)
+    Falls nicht unter Windows oder MessageBox nicht verfügbar, fällt es auf print zurück.
+    """
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, str(message), str(title), 0)
+    except Exception:
+        try:
+            print(f"{title}: {message}")
+        except Exception:
+            pass
 
 
-        def quick_start_action():
-            data = load_data()
-            today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
-            today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
-            now_str = datetime.now().strftime(TIME_FORMAT)
-            today_entry = get_entry_by_date(data, today_internal)
-
-            if today_entry:
-                if today_entry.get('Typ') == 'Arbeit' and today_entry.get('Startzeit'):
-                    # already checked in
-                    _show_messagebox('Bereits eingecheckt', f"Sie sind bereits am {today_display} um {today_entry['Startzeit']} eingecheckt.")
-                    return
-                if today_entry.get('Typ') != 'Arbeit':
-                    _show_messagebox('Eintrag-Konflikt', f"Für {today_display} existiert ein Eintrag vom Typ '{today_entry.get('Typ')}'. Bitte überprüfen.")
-                    return
-                # entry exists but no starttime -> set it
-                today_entry['Startzeit'] = now_str
-                today_entry['Dauer'] = calculate_duration(today_entry.get('Startzeit', ''), today_entry.get('Endzeit', ''))
-                save_data(data)
-                _show_messagebox('Eingecheckt', f"Eingecheckt: {today_display} um {now_str}.")
-                return
-
-            # no entry -> create one
-            data.append({'Datum': today_internal, 'Typ': 'Arbeit', 'Startzeit': now_str, 'Endzeit': '', 'Dauer': '', 'Kommentar': ''})
-            save_data(data)
-            _show_messagebox('Eingecheckt', f"Eingecheckt: {today_display} um {now_str}.")
+def _get_last_checkout_time(data):
+    """Return a tuple (date_display, time_str) of the most recent Endzeit found, or (None, None)."""
+    for entry in reversed(data):
+        et = entry.get('Endzeit')
+        if et:
+            return (to_display(entry.get('Datum', '')), et)
+    return (None, None)
 
 
-        def quick_end_action():
-            data = load_data()
-            today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
-            today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
-            now_str = datetime.now().strftime(TIME_FORMAT)
-            today_entry = get_entry_by_date(data, today_internal)
+def quick_start_action():
+    data = load_data()
+    today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
+    today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
+    now_str = datetime.now().strftime(TIME_FORMAT)
+    today_entry = get_entry_by_date(data, today_internal)
 
-            if not today_entry or today_entry.get('Typ') != 'Arbeit' or not today_entry.get('Startzeit'):
-                # undefined state: no start recorded for today
-                last_date, last_time = _get_last_checkout_time(data)
-                if last_time:
-                    _show_messagebox('Kein Arbeitsbeginn gefunden', f"Kein Arbeitsbeginn für heute gefunden. Letzter Checkout: {last_date} um {last_time}. Aktion abgebrochen.")
-                else:
-                    _show_messagebox('Kein Arbeitsbeginn gefunden', "Kein Arbeitsbeginn für heute gefunden. Aktion abgebrochen.")
-                return
+    if today_entry:
+        if today_entry.get('Typ') == 'Arbeit' and today_entry.get('Startzeit'):
+            # already checked in
+            _show_messagebox('Bereits eingecheckt', f"Sie sind bereits am {today_display} um {today_entry['Startzeit']} eingecheckt.")
+            return
+        if today_entry.get('Typ') != 'Arbeit':
+            _show_messagebox('Eintrag-Konflikt', f"Für {today_display} existiert ein Eintrag vom Typ '{today_entry.get('Typ')}'. Bitte überprüfen.")
+            return
+        # entry exists but no starttime -> set it
+        today_entry['Startzeit'] = now_str
+        today_entry['Dauer'] = calculate_duration(today_entry.get('Startzeit', ''), today_entry.get('Endzeit', ''))
+        save_data(data)
+        _show_messagebox('Eingecheckt', f"Eingecheckt: {today_display} um {now_str}.")
+        return
 
-            if today_entry.get('Endzeit'):
-                _show_messagebox('Bereits ausgecheckt', f"Sie haben bereits um {today_entry['Endzeit']} ausgecheckt.")
-                return
+    # no entry -> create one
+    data.append({'Datum': today_internal, 'Typ': 'Arbeit', 'Startzeit': now_str, 'Endzeit': '', 'Dauer': '', 'Kommentar': ''})
+    save_data(data)
+    _show_messagebox('Eingecheckt', f"Eingecheckt: {today_display} um {now_str}.")
 
-            today_entry['Endzeit'] = now_str
-            today_entry['Dauer'] = calculate_duration(today_entry.get('Startzeit', ''), today_entry.get('Endzeit', ''))
-            save_data(data)
-            _show_messagebox('Ausgecheckt', f"Ausgecheckt: {today_display} um {now_str}. Gearbeitet: {today_entry['Dauer']} Stunden.")
+
+def quick_end_action():
+    data = load_data()
+    today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
+    today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
+    now_str = datetime.now().strftime(TIME_FORMAT)
+    today_entry = get_entry_by_date(data, today_internal)
+
+    if not today_entry or today_entry.get('Typ') != 'Arbeit' or not today_entry.get('Startzeit'):
+        # undefined state: no start recorded for today
+        last_date, last_time = _get_last_checkout_time(data)
+        if last_time:
+            _show_messagebox('Kein Arbeitsbeginn gefunden', f"Kein Arbeitsbeginn für heute gefunden. Letzter Checkout: {last_date} um {last_time}. Aktion abgebrochen.")
+        else:
+            _show_messagebox('Kein Arbeitsbeginn gefunden', "Kein Arbeitsbeginn für heute gefunden. Aktion abgebrochen.")
+        return
+
+    if today_entry.get('Endzeit'):
+        _show_messagebox('Bereits ausgecheckt', f"Sie haben bereits um {today_entry['Endzeit']} ausgecheckt.")
+        return
+
+    today_entry['Endzeit'] = now_str
+    today_entry['Dauer'] = calculate_duration(today_entry.get('Startzeit', ''), today_entry.get('Endzeit', ''))
+    save_data(data)
+    _show_messagebox('Ausgecheckt', f"Ausgecheckt: {today_display} um {now_str}. Gearbeitet: {today_entry['Dauer']} Stunden.")
 
 
 def input_time(prompt: str, default: Optional[str] = None) -> str:

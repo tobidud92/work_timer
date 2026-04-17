@@ -1,0 +1,80 @@
+import unittest
+from datetime import datetime
+import code.work_timer as wt
+
+
+class TestQuickActionsMessageBox(unittest.TestCase):
+    def setUp(self):
+        # in-memory data store to simulate CSV contents
+        self.data_store = []
+        def fake_load():
+            return self.data_store
+        def fake_save(d):
+            # replace contents of the in-memory store to simulate write
+            temp = list(d)
+            self.data_store.clear()
+            self.data_store.extend(temp)
+
+        # patch load/save and messagebox
+        wt.load_data_orig = wt.load_data
+        wt.save_data_orig = wt.save_data
+        wt._show_messagebox_orig = getattr(wt, '_show_messagebox', None)
+        wt.load_data = fake_load
+        wt.save_data = fake_save
+
+        self.msg_calls = []
+        def fake_msg(title, message):
+            self.msg_calls.append((title, message))
+        wt._show_messagebox = fake_msg
+
+    def tearDown(self):
+        # restore
+        wt.load_data = wt.load_data_orig
+        wt.save_data = wt.save_data_orig
+        if wt._show_messagebox_orig is None:
+            try:
+                delattr(wt, '_show_messagebox')
+            except Exception:
+                pass
+        else:
+            wt._show_messagebox = wt._show_messagebox_orig
+
+    def test_quick_start_creates_entry_when_none(self):
+        self.assertEqual(len(self.data_store), 0)
+        wt.quick_start_action()
+        self.assertEqual(len(self.data_store), 1)
+        entry = self.data_store[0]
+        self.assertEqual(entry['Typ'], 'Arbeit')
+        self.assertIsNotNone(entry.get('Startzeit'))
+        self.assertTrue(any('Eingecheckt' in t for t, m in self.msg_calls))
+
+    def test_quick_start_when_already_started_shows_message(self):
+        today = datetime.now().strftime(wt.DATE_FORMAT_INTERNAL)
+        self.data_store.append({'Datum': today, 'Typ': 'Arbeit', 'Startzeit': '08:00', 'Endzeit': '', 'Dauer': '', 'Kommentar': ''})
+        wt.quick_start_action()
+        # should not create another entry
+        self.assertEqual(len(self.data_store), 1)
+        self.assertTrue(any('Bereits eingecheckt' in t for t, m in self.msg_calls))
+
+    def test_quick_end_without_start_shows_warning(self):
+        # no entries
+        wt.quick_end_action()
+        self.assertTrue(any('Kein Arbeitsbeginn gefunden' in t for t, m in self.msg_calls))
+
+    def test_quick_end_success_sets_endtime(self):
+        today = datetime.now().strftime(wt.DATE_FORMAT_INTERNAL)
+        self.data_store.append({'Datum': today, 'Typ': 'Arbeit', 'Startzeit': '08:00', 'Endzeit': '', 'Dauer': '', 'Kommentar': ''})
+        wt.quick_end_action()
+        entry = self.data_store[0]
+        self.assertTrue(entry.get('Endzeit'))
+        self.assertTrue(any('Ausgecheckt' in t for t, m in self.msg_calls))
+
+    def test_quick_end_when_already_ended_shows_message(self):
+        today = datetime.now().strftime(wt.DATE_FORMAT_INTERNAL)
+        self.data_store.append({'Datum': today, 'Typ': 'Arbeit', 'Startzeit': '08:00', 'Endzeit': '12:00', 'Dauer': '4.00', 'Kommentar': ''})
+        wt.quick_end_action()
+        self.assertTrue(any('Bereits ausgecheckt' in t for t, m in self.msg_calls))
+
+
+if __name__ == '__main__':
+    unittest.main()
