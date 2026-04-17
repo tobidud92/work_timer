@@ -256,7 +256,11 @@ def input_date(prompt):
                         new = adjust_date_display(cur, 1)
                         _adjust_buffer(buf, new)
 
-                    date_str = _prompt(full_prompt, default=today_display, key_bindings=kb)
+                    # Some test mocks or older prompt implementations may not accept key_bindings kwarg.
+                    try:
+                        date_str = _prompt(full_prompt, default=today_display, key_bindings=kb)
+                    except TypeError:
+                        date_str = _prompt(full_prompt, default=today_display)
                 else:
                     date_str = _prompt(full_prompt, default=today_display)
             except Exception:
@@ -273,6 +277,84 @@ def input_date(prompt):
         print("Ungültiges Datumsformat. Bitte verwende TT.MM.JJJJ.")
 
 
+        def _show_messagebox(title: str, message: str):
+            """Show a Windows message box (works in packaged exe too).
+
+            Falls nicht unter Windows oder MessageBox nicht verfügbar, fällt es auf print zurück.
+            """
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(0, str(message), str(title), 0)
+            except Exception:
+                try:
+                    print(f"{title}: {message}")
+                except Exception:
+                    pass
+
+
+        def _get_last_checkout_time(data):
+            """Return a tuple (date_display, time_str) of the most recent Endzeit found, or (None, None)."""
+            for entry in reversed(data):
+                et = entry.get('Endzeit')
+                if et:
+                    return (to_display(entry.get('Datum', '')), et)
+            return (None, None)
+
+
+        def quick_start_action():
+            data = load_data()
+            today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
+            today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
+            now_str = datetime.now().strftime(TIME_FORMAT)
+            today_entry = get_entry_by_date(data, today_internal)
+
+            if today_entry:
+                if today_entry.get('Typ') == 'Arbeit' and today_entry.get('Startzeit'):
+                    # already checked in
+                    _show_messagebox('Bereits eingecheckt', f"Sie sind bereits am {today_display} um {today_entry['Startzeit']} eingecheckt.")
+                    return
+                if today_entry.get('Typ') != 'Arbeit':
+                    _show_messagebox('Eintrag-Konflikt', f"Für {today_display} existiert ein Eintrag vom Typ '{today_entry.get('Typ')}'. Bitte überprüfen.")
+                    return
+                # entry exists but no starttime -> set it
+                today_entry['Startzeit'] = now_str
+                today_entry['Dauer'] = calculate_duration(today_entry.get('Startzeit', ''), today_entry.get('Endzeit', ''))
+                save_data(data)
+                _show_messagebox('Eingecheckt', f"Eingecheckt: {today_display} um {now_str}.")
+                return
+
+            # no entry -> create one
+            data.append({'Datum': today_internal, 'Typ': 'Arbeit', 'Startzeit': now_str, 'Endzeit': '', 'Dauer': '', 'Kommentar': ''})
+            save_data(data)
+            _show_messagebox('Eingecheckt', f"Eingecheckt: {today_display} um {now_str}.")
+
+
+        def quick_end_action():
+            data = load_data()
+            today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
+            today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
+            now_str = datetime.now().strftime(TIME_FORMAT)
+            today_entry = get_entry_by_date(data, today_internal)
+
+            if not today_entry or today_entry.get('Typ') != 'Arbeit' or not today_entry.get('Startzeit'):
+                # undefined state: no start recorded for today
+                last_date, last_time = _get_last_checkout_time(data)
+                if last_time:
+                    _show_messagebox('Kein Arbeitsbeginn gefunden', f"Kein Arbeitsbeginn für heute gefunden. Letzter Checkout: {last_date} um {last_time}. Aktion abgebrochen.")
+                else:
+                    _show_messagebox('Kein Arbeitsbeginn gefunden', "Kein Arbeitsbeginn für heute gefunden. Aktion abgebrochen.")
+                return
+
+            if today_entry.get('Endzeit'):
+                _show_messagebox('Bereits ausgecheckt', f"Sie haben bereits um {today_entry['Endzeit']} ausgecheckt.")
+                return
+
+            today_entry['Endzeit'] = now_str
+            today_entry['Dauer'] = calculate_duration(today_entry.get('Startzeit', ''), today_entry.get('Endzeit', ''))
+            save_data(data)
+            _show_messagebox('Ausgecheckt', f"Ausgecheckt: {today_display} um {now_str}. Gearbeitet: {today_entry['Dauer']} Stunden.")
+
+
 def input_time(prompt: str, default: Optional[str] = None) -> str:
     """Prompt for a time 'HH:MM'. Uses prompt_toolkit if available; returns validated time string."""
     if default is None:
@@ -281,7 +363,43 @@ def input_time(prompt: str, default: Optional[str] = None) -> str:
     while True:
         if _prompt:
             try:
-                s = _prompt(full_prompt, default=default)
+                # try to provide arrow-key Up/Down to change the time if prompt_toolkit supports key bindings
+                try:
+                    from prompt_toolkit.key_binding import KeyBindings
+                    from prompt_toolkit.document import Document
+                except Exception:
+                    KeyBindings = None
+
+                if KeyBindings:
+                    kb = KeyBindings()
+
+                    def _adjust_buffer(buf, new_text):
+                        try:
+                            buf.set_document(Document(new_text, cursor_position=len(new_text)), bypass_undo=True)
+                        except Exception:
+                            buf.text = new_text
+
+                    @kb.add('up')
+                    def _(_event):
+                        buf = _event.current_buffer
+                        cur = buf.text.strip() or default
+                        new = adjust_time_display(cur, -1)
+                        _adjust_buffer(buf, new)
+
+                    @kb.add('down')
+                    def _(_event):
+                        buf = _event.current_buffer
+                        cur = buf.text.strip() or default
+                        new = adjust_time_display(cur, 1)
+                        _adjust_buffer(buf, new)
+
+                    # Some test mocks or older prompt implementations may not accept key_bindings kwarg.
+                    try:
+                        s = _prompt(full_prompt, default=default, key_bindings=kb)
+                    except TypeError:
+                        s = _prompt(full_prompt, default=default)
+                else:
+                    s = _prompt(full_prompt, default=default)
             except Exception:
                 s = input(full_prompt)
         else:
@@ -311,6 +429,22 @@ def adjust_date_display(date_display: str, delta_days: int) -> str:
             d = date.today()
     d = d + timedelta(days=delta_days)
     return d.strftime(DATE_FORMAT_DISPLAY)
+
+
+def adjust_time_display(time_display: str, delta_minutes: int) -> str:
+    """Return a TIME_FORMAT string shifted by delta_minutes.
+
+    If the input is empty or invalid, treat it as now (rounded to minute).
+    """
+    if not time_display:
+        now = datetime.now().replace(second=0, microsecond=0)
+    else:
+        try:
+            now = datetime.strptime(time_display, TIME_FORMAT)
+        except Exception:
+            now = datetime.now().replace(second=0, microsecond=0)
+    new = now + timedelta(minutes=delta_minutes)
+    return new.strftime(TIME_FORMAT)
 
 # --- Feiertage Bayern / Erlangen 2026–2031 ---
 
@@ -861,7 +995,7 @@ def edit_work_start():
     if not entry:
         print(f"Kein Eintrag für {date_display} gefunden.")
         if ask_yes("Neuen Arbeits-Eintrag für dieses Datum erstellen? (j/n): "):
-            new_start = input(f"Startzeit für {date_display} (HH:MM): ")
+            new_start = input_time(f"Startzeit für {date_display}")
             try:
                 datetime.strptime(new_start, TIME_FORMAT)
                 data.append({'Datum': date_internal, 'Typ': 'Arbeit', 'Startzeit': new_start,
@@ -880,7 +1014,7 @@ def edit_work_start():
         entry['Kommentar'] = ''
 
     print(f"Aktueller Arbeitsbeginn für {date_display}: {entry.get('Startzeit', 'nicht gesetzt')} Uhr")
-    new_start = input_time("Neue Startzeit (HH:MM, leer = keine Änderung)")
+    new_start = input_time("Neue Startzeit (HH:MM, leer = keine Änderung)", default=entry.get('Startzeit') or None)
     if new_start:
         try:
             datetime.strptime(new_start, TIME_FORMAT)
@@ -916,7 +1050,7 @@ def edit_work_end():
         return
 
     print(f"Aktuelles Arbeitsende für {date_display}: {entry.get('Endzeit', 'nicht gesetzt')} Uhr")
-    new_end = input_time("Neues Arbeitsende (HH:MM, leer = keine Änderung)")
+    new_end = input_time("Neues Arbeitsende (HH:MM, leer = keine Änderung)", default=entry.get('Endzeit') or None)
     if new_end:
         try:
             datetime.strptime(new_end, TIME_FORMAT)
@@ -1459,10 +1593,10 @@ if __name__ == "__main__":
     args, _ = parser.parse_known_args()
 
     if args.start_now:
-        start_work()
+        quick_start_action()
         sys.exit(0)
     if args.end_now:
-        end_work()
+        quick_end_action()
         sys.exit(0)
 
     running = True
