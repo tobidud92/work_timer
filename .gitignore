@@ -26,3 +26,7 @@ temp/
 # Test/build artifacts
 *.egg-info/
 .pytest_cache/
+
+# Generated installer folder
+WorkTimerInstall/
+WorkTimerInstall_test/

@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if (Test-Path requirements.txt) { python -m pip install -r requirements.txt } else { Write-Host 'No requirements.txt' }
+        shell: pwsh
+
+      - name: Run tests
+        run: python -m pytest -q
+        shell: pwsh
+
+      - name: Generate installer folder
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\generate_install_folder.ps1 -OutDir WorkTimerInstall_test -Force
+        shell: pwsh
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: WorkTimerInstall_test
+          path: WorkTimerInstall_test
