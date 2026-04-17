@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if (Test-Path requirements.txt) { python -m pip install -r requirements.txt } else { Write-Host 'No requirements.txt' }
+        shell: pwsh
+
+      - name: Generate installer folder
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\generate_install_folder.ps1 -OutDir WorkTimerInstall_release -Force
+        shell: pwsh
+
+      - name: Compress installer folder
+        run: powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'WorkTimerInstall_release\\*' -DestinationPath 'WorkTimerInstall_release.zip' -Force"
+        shell: pwsh
+
+      - name: Optional: Sign executable (requires secrets.PFX_BASE64 and secrets.PFX_PASSWORD)
+        if: ${{ secrets.PFX_BASE64 && secrets.PFX_PASSWORD }}
+        run: |
+          Write-Host 'Decoding PFX and attempting to sign executable(s)'
+          $pfxPath = "agent_temp_cert.pfx"
+          [System.IO.File]::WriteAllBytes($pfxPath, [System.Convert]::FromBase64String("${{ secrets.PFX_BASE64 }}"))
+          $pwd = "${{ secrets.PFX_PASSWORD }}"
+          $files = Get-ChildItem -Path WorkTimerInstall_release -Filter *.exe -File -Recurse
+          foreach ($f in $files) {
+              Write-Host "Signing $($f.FullName)"
+              signtool sign /f $pfxPath /p $pwd /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $f.FullName
+          }
+        shell: pwsh
+
+      - name: Create GitHub release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+      - name: Upload ZIP to release
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: WorkTimerInstall_release.zip
+          asset_name: WorkTimerInstall_release.zip
+          asset_content_type: application/zip

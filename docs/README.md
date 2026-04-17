@@ -6,6 +6,16 @@ Installation
 
 - Lege ein virtuelles Environment an und installiere Abhängigkeiten (ReportLab und optional `prompt_toolkit`):
 
+CI: [![CI](https://github.com/tobidud92/work_timer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tobidud92/work_timer/actions/workflows/ci.yml)
+
+# Work Timer — Bedienungsanleitung
+
+Kurze Anleitung zur Nutzung des kleinen Arbeitszeit-Trackers.
+
+Installation
+
+- Lege ein virtuelles Environment an und installiere Abhängigkeiten (ReportLab und optional `prompt_toolkit`):
+
 ```powershell
 python -m venv .venv
 & .venv\Scripts\Activate.ps1
