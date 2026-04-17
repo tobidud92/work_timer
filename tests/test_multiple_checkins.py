@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-import code.work_timer as work_timer
+import src.work_timer as work_timer
 
 
 class TestMultipleCheckins(unittest.TestCase):

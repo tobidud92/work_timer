@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 
-import code.work_timer as work_timer
+import src.work_timer as work_timer
 
 
 class TestEdgeCases(unittest.TestCase):

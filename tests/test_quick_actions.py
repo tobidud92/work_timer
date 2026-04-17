@@ -6,7 +6,7 @@ import importlib
 
 import unittest
 
-import code.work_timer as wt
+import src.work_timer as wt
 
 
 class TestQuickActions(unittest.TestCase):

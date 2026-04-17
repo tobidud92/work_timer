@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime
-import code.work_timer as wt
+import src.work_timer as wt
 
 
 class TestQuickActionsMessageBox(unittest.TestCase):

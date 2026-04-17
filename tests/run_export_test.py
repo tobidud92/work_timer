@@ -1,6 +1,6 @@
 import os
 import shutil
-from code.work_timer import backup_config, load_config, save_config, PUBLIC_HOLIDAYS, export_holidays_to_csv, CONFIG_FILE
+from src.work_timer import backup_config, load_config, save_config, PUBLIC_HOLIDAYS, export_holidays_to_csv, CONFIG_FILE
 
 def main():
     # backup existing config

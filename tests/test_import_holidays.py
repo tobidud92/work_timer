@@ -3,7 +3,7 @@ import tempfile
 import unittest
 import csv
 
-import code.work_timer as work_timer
+import src.work_timer as work_timer
 
 
 class TestImportHolidays(unittest.TestCase):

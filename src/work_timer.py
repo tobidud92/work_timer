@@ -900,7 +900,115 @@ def add_special_day(day_type):
         print(f"Feiertag {date_display} ('{name_for_holiday}') in {CONFIG_FILE} gespeichert (Config ist Single-Source-of-Truth).")
         return
 
-    # Otherwise (Urlaub, Zeitausgleich, etc.) keep CSV entries as before
+    # Otherwise handle special day types that are stored in the CSV
+    if day_type == 'Urlaub':
+        # For vacation allow entering a range: start and end
+        print('Urlaubszeitraum eingeben:')
+        start_internal = input_date('Urlaubsbeginn')
+        end_internal = input_date('Urlaubsende')
+        try:
+            start_dt = datetime.strptime(start_internal, DATE_FORMAT_INTERNAL).date()
+            end_dt = datetime.strptime(end_internal, DATE_FORMAT_INTERNAL).date()
+        except ValueError:
+            print('Ungültiges Datum. Abgebrochen.')
+            return
+
+        if end_dt < start_dt:
+            print('Das Enddatum liegt vor dem Beginn. Abgebrochen.')
+            return
+
+        cfg = load_config()
+        cfg_holidays = set(cfg.get('holidays', {}).keys()) if isinstance(cfg, dict) else set()
+
+        # classify days: collect candidates, hard conflicts and soft conflicts
+        candidates = []
+        hard_conflicts = []
+        soft_conflicts = []
+        current = start_dt
+        while current <= end_dt:
+            di = current.strftime(DATE_FORMAT_INTERNAL)
+            dd = current.strftime(DATE_FORMAT_DISPLAY)
+
+            # weekend = hard conflict
+            if current.weekday() >= 5:
+                hard_conflicts.append((dd, 'Wochenende'))
+                current += timedelta(days=1)
+                continue
+
+            # holiday = hard conflict
+            if is_public_holiday(di, cfg_holidays):
+                name = PUBLIC_HOLIDAYS.get(di) or cfg.get('holidays', {}).get(di, 'Feiertag')
+                hard_conflicts.append((dd, f'Feiertag ({name})'))
+                current += timedelta(days=1)
+                continue
+
+            existing_entry = get_entry_by_date(data, di)
+            if existing_entry and existing_entry.get('Typ') == 'Zeitausgleich':
+                hard_conflicts.append((dd, 'Gleitzeittag (Zeitausgleich)'))
+                current += timedelta(days=1)
+                continue
+
+            if existing_entry:
+                soft_conflicts.append((dd, existing_entry.get('Typ')))
+            else:
+                candidates.append(di)
+
+            current += timedelta(days=1)
+
+        # report hard conflicts
+        if hard_conflicts:
+            print('\nNicht eintragbare Tage (Wochenende/Feiertag/Zeitausgleich):')
+            for dstr, reason in hard_conflicts:
+                print(f" - {dstr}: {reason}")
+
+        # handle soft conflicts: either overwrite all, per-day, or skip
+        to_add = list(candidates)
+        to_overwrite = []
+        if soft_conflicts:
+            print('\nGefundene Konflikte mit bestehenden Einträgen:')
+            for dstr, typ in soft_conflicts:
+                print(f" - {dstr}: bestehender Eintrag '{typ}'")
+
+            print('\nOptionen: (a) Alle überschreiben, (e) Einzeln pro Tag, (n) Nicht überschreiben')
+            while True:
+                ch = input('Wähle (a/e/n): ').strip().lower()
+                if ch in ('a', 'e', 'n'):
+                    break
+            if ch == 'a':
+                # overwrite all soft conflicts
+                for dstr, _ in soft_conflicts:
+                    di = to_internal(dstr)
+                    if di:
+                        to_overwrite.append(di)
+            elif ch == 'e':
+                # ask per date
+                for dstr, typ in soft_conflicts:
+                    if ask_yes(f"Für {dstr} existiert bereits ein Eintrag vom Typ '{typ}'. Überschreiben? (j/n): "):
+                        di = to_internal(dstr)
+                        if di:
+                            to_overwrite.append(di)
+                    else:
+                        print(f"Überspringe {dstr}.")
+            else:
+                print('Keine bestehenden Einträge überschrieben.')
+
+        # apply additions and overwrites
+        added_count = 0
+        for di in to_add:
+            data.append({'Datum': di, 'Typ': 'Urlaub', 'Startzeit': '', 'Endzeit': '', 'Dauer': '', 'Kommentar': comment})
+            added_count += 1
+
+        for di in to_overwrite:
+            existing_entry = get_entry_by_date(data, di)
+            if existing_entry:
+                existing_entry.update({'Typ': 'Urlaub', 'Startzeit': '', 'Endzeit': '', 'Dauer': '', 'Kommentar': comment})
+                added_count += 1
+
+        save_data(data)
+        print(f"{added_count} Urlaubstag(er) hinzugefügt/überschrieben.")
+        return
+
+    # Zeitausgleich and other single-day types: existing behaviour
     if existing:
         if not ask_yes(f"Für {date_display} existiert bereits ein Eintrag vom Typ '{existing['Typ']}'. Überschreiben? (j/n): "):
             print("Vorgang abgebrochen.")

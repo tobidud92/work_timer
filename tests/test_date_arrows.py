@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timedelta
-import code.work_timer as wt
+import src.work_timer as wt
 
 
 class TestDateArrows(unittest.TestCase):
