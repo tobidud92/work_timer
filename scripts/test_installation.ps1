@@ -1,5 +1,5 @@
 Param(
-    [string]$OutDir = "WorkTimerInstall_test"
+    [string]$OutDir = "WorkTimerInstall"
 )
 
 Set-StrictMode -Version Latest
