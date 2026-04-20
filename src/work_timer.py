@@ -31,6 +31,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.lib import colors
+import os
 
 # --- Konfiguration ---
 CSV_FILE             = 'arbeitszeiten.csv'
@@ -39,6 +40,8 @@ DATE_FORMAT_INTERNAL = '%Y-%m-%d'
 DATE_FORMAT_DISPLAY  = '%d.%m.%Y'
 TIME_FORMAT          = '%H:%M'
 PDF_REPORT_DIR       = 'reports'
+QUICK_ACTION_LOG     = None
+MSHTA_TIMEOUT        = 4
 WEEKLY_HOURS         = 35.0
 DAILY_HOURS          = WEEKLY_HOURS / 5   # 7.0 h
 BREAK_THRESHOLD_HOURS = 6.0
@@ -320,7 +323,7 @@ def _show_messagebox(title: str, message: str):
         esc_msg = str(message).replace('"', '\\"').replace('\n', ' ')
         esc_title = str(title).replace('"', '\\"')
         # Popup(timeout_seconds) - using 4 seconds display and information icon (64)
-        js = f"javascript:var sh=new ActiveXObject(\"WScript.Shell\"); sh.Popup(\"{esc_msg}\",4,\"{esc_title}\",64);close();"
+        js = f"javascript:var sh=new ActiveXObject(\"WScript.Shell\"); sh.Popup(\"{esc_msg}\",{MSHTA_TIMEOUT},\"{esc_title}\",64);close();"
         subprocess.Popen(['mshta', js], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return
     except Exception:
@@ -344,6 +347,7 @@ def _get_last_checkout_time(data):
 
 def quick_start_action():
     data = load_data()
+    _log_quick_action('start', 'begin', '')
     today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
     today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
     now_str = datetime.now().strftime(TIME_FORMAT)
@@ -353,25 +357,30 @@ def quick_start_action():
         if today_entry.get('Typ') == 'Arbeit' and today_entry.get('Startzeit'):
             # already checked in
             _show_messagebox('Bereits eingecheckt', f"Sie sind bereits am {today_display} um {today_entry['Startzeit']} eingecheckt.")
+            _log_quick_action('start', 'skipped', f"already checked in {today_entry.get('Startzeit')}")
             return
         if today_entry.get('Typ') != 'Arbeit':
             _show_messagebox('Eintrag-Konflikt', f"Für {today_display} existiert ein Eintrag vom Typ '{today_entry.get('Typ')}'. Bitte überprüfen.")
+            _log_quick_action('start', 'error', f"entry conflict type={today_entry.get('Typ')}")
             return
         # entry exists but no starttime -> set it
         today_entry['Startzeit'] = now_str
         today_entry['Dauer'] = calculate_duration(today_entry.get('Startzeit', ''), today_entry.get('Endzeit', ''))
         save_data(data)
+        _log_quick_action('start', 'ok', f"start {now_str}")
         _show_messagebox('Eingecheckt', f"Eingecheckt: {today_display} um {now_str}.")
         return
 
     # no entry -> create one
     data.append({'Datum': today_internal, 'Typ': 'Arbeit', 'Startzeit': now_str, 'Endzeit': '', 'Dauer': '', 'Kommentar': ''})
     save_data(data)
+    _log_quick_action('start', 'ok', f"start {now_str}")
     _show_messagebox('Eingecheckt', f"Eingecheckt: {today_display} um {now_str}.")
 
 
 def quick_end_action():
     data = load_data()
+    _log_quick_action('end', 'begin', '')
     today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
     today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
     now_str = datetime.now().strftime(TIME_FORMAT)
@@ -382,17 +391,21 @@ def quick_end_action():
         last_date, last_time = _get_last_checkout_time(data)
         if last_time:
             _show_messagebox('Kein Arbeitsbeginn gefunden', f"Kein Arbeitsbeginn für heute gefunden. Letzter Checkout: {last_date} um {last_time}. Aktion abgebrochen.")
+            _log_quick_action('end', 'error', f"no start found, last {last_date} {last_time}")
         else:
             _show_messagebox('Kein Arbeitsbeginn gefunden', "Kein Arbeitsbeginn für heute gefunden. Aktion abgebrochen.")
+            _log_quick_action('end', 'error', "no start found")
         return
 
     if today_entry.get('Endzeit'):
         _show_messagebox('Bereits ausgecheckt', f"Sie haben bereits um {today_entry['Endzeit']} ausgecheckt.")
+        _log_quick_action('end', 'skipped', f"already ended {today_entry.get('Endzeit')}")
         return
 
     today_entry['Endzeit'] = now_str
     today_entry['Dauer'] = calculate_duration(today_entry.get('Startzeit', ''), today_entry.get('Endzeit', ''))
     save_data(data)
+    _log_quick_action('end', 'ok', f"end {now_str} dur={today_entry.get('Dauer','')}")
     _show_messagebox('Ausgecheckt', f"Ausgecheckt: {today_display} um {now_str}. Gearbeitet: {today_entry['Dauer']} Stunden.")
 
 
@@ -646,6 +659,23 @@ def get_entry_by_date(data, target_date_internal):
         if entry['Datum'] == target_date_internal:
             return entry
     return None
+
+
+def _log_quick_action(action: str, status: str, msg: str = ''):
+    """Append a single-line log entry to QUICK_ACTION_LOG if set.
+
+    Format: ISO8601<TAB>action<TAB>status<TAB>msg
+    """
+    global QUICK_ACTION_LOG
+    if not QUICK_ACTION_LOG:
+        return
+    try:
+        path = os.path.expandvars(os.path.expanduser(QUICK_ACTION_LOG))
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now().isoformat()}\t{action}\t{status}\t{msg}\n")
+            f.flush()
+    except Exception:
+        pass
 
 def calculate_duration(start_time_str, end_time_str):
     if not start_time_str or not end_time_str:
@@ -1782,7 +1812,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--start-now', action='store_true', help='Record start time now and exit')
     parser.add_argument('--end-now', action='store_true', help='Record end time now and exit')
+    parser.add_argument('--log-file', help='Append quick-action events to this logfile')
+    parser.add_argument('--mshta-timeout', type=int, help='Timeout in seconds for mshta popups (quick-action notifications)')
     args, _ = parser.parse_known_args()
+
+    # configure quick action logging if requested
+    if getattr(args, 'log_file', None):
+        QUICK_ACTION_LOG = args.log_file
+    if getattr(args, 'mshta_timeout', None) is not None:
+        try:
+            MSHTA_TIMEOUT = int(args.mshta_timeout)
+        except Exception:
+            pass
 
     if args.start_now:
         quick_start_action()

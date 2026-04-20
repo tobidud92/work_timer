@@ -9,9 +9,15 @@ rem Change working directory to the script folder so paths with spaces/() are ha
 pushd "%~dp0" >nul
 set "SRC=%CD%"
 
-rem Determine the user's Documents folder in a language-neutral way
-for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')"`) do set "DOCS=%%D"
-set "DEST=%DOCS%\Arbeitszeit"
+rem Allow test-mode where copying goes into a local test folder instead of user Documents
+if "%SKIP_COPY%"=="1" (
+    set "DEST=%CD%\test_installed"
+    if not exist "%DEST%" mkdir "%DEST%"
+) else (
+    rem Determine the user's Documents folder in a language-neutral way
+    for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')"`) do set "DOCS=%%D"
+    set "DEST=%DOCS%\Arbeitszeit"
+)
 
 echo Installing Work Timer to %DEST%
 if not exist "%DEST%" (
@@ -70,19 +76,19 @@ if exist "%SRC%\..\data\WorkTimer.ico" (
 
 rem Create small wrapper batch files that call the EXE and log stdout/stderr to Desktop
 (echo @echo off) > "%DEST%\kommen.bat"
-(echo "%DEST%\work_timer.exe" --start-now ^>^> "%USERPROFILE%\Desktop\work_timer_kommen_log.txt" 2^>^&1) >> "%DEST%\kommen.bat"
+(echo "%DEST%\work_timer.exe" --start-now --log-file "%USERPROFILE%\Desktop\work_timer_quick.log" ^>^> "%USERPROFILE%\Desktop\work_timer_kommen_log.txt" 2^>^&1) >> "%DEST%\kommen.bat"
 (echo exit /b) >> "%DEST%\kommen.bat"
 
 (echo @echo off) > "%DEST%\gehen.bat"
-(echo "%DEST%\work_timer.exe" --end-now ^>^> "%USERPROFILE%\Desktop\work_timer_gehen_log.txt" 2^>^&1) >> "%DEST%\gehen.bat"
+(echo "%DEST%\work_timer.exe" --end-now --log-file "%USERPROFILE%\Desktop\work_timer_quick.log" ^>^> "%USERPROFILE%\Desktop\work_timer_gehen_log.txt" 2^>^&1) >> "%DEST%\gehen.bat"
 (echo exit /b) >> "%DEST%\gehen.bat"
 
 rem Create VBS wrappers to run the exe without showing a console window
 echo Set WshShell = CreateObject("WScript.Shell") > "%DEST%\kommen.vbs"
-echo WshShell.Run Chr(34) ^& "%DEST%\work_timer.exe" ^& Chr(34) ^& " --start-now", 0, False >> "%DEST%\kommen.vbs"
+echo WshShell.Run Chr(34) ^& "%DEST%\work_timer.exe" ^& Chr(34) ^& " --start-now --log-file \"%USERPROFILE%\\Desktop\\work_timer_quick.log\"", 0, False >> "%DEST%\kommen.vbs"
 
 echo Set WshShell = CreateObject("WScript.Shell") > "%DEST%\gehen.vbs"
-echo WshShell.Run Chr(34) ^& "%DEST%\work_timer.exe" ^& Chr(34) ^& " --end-now", 0, False >> "%DEST%\gehen.vbs"
+echo WshShell.Run Chr(34) ^& "%DEST%\work_timer.exe" ^& Chr(34) ^& " --end-now --log-file \"%USERPROFILE%\\Desktop\\work_timer_quick.log\"", 0, False >> "%DEST%\gehen.vbs"
 
 echo Creating desktop shortcuts...
 
@@ -117,27 +123,37 @@ echo $s.WorkingDirectory = $d >> "%PSFILE%"
 echo $s.Save() >> "%PSFILE%"
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%PSFILE%"
-if exist "%PSFILE%" del "%PSFILE%"
+if not "%SKIP_DESKTOP_SHORTCUTS%"=="1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%PSFILE%"
+    if exist "%PSFILE%" del "%PSFILE%"
+) else (
+    echo Skipping desktop shortcut creation (SKIP_DESKTOP_SHORTCUTS=1)
+    if exist "%PSFILE%" del "%PSFILE%"
+)
 
 rem Try to refresh Windows icon cache so the new .ico files are shown on the Desktop
-echo Refreshing Windows icon cache (may restart Explorer)...
-timeout /t 1 /nobreak >nul
-tasklist /FI "IMAGENAME eq explorer.exe" | findstr /I "explorer.exe" >nul
-if %ERRORLEVEL%==0 (
-    taskkill /IM explorer.exe /F >nul 2>&1
-    rem remove Explorer icon cache files (no admin required for local AppData)
-    del /F /Q "%localappdata%\Microsoft\Windows\Explorer\iconcache*" >nul 2>&1
-    del /F /Q "%localappdata%\IconCache.db" >nul 2>&1
-    start explorer.exe
-    rem try IE icon refresh helper if available
-    if exist "%windir%\system32\ie4uinit.exe" (
-        "%windir%\system32\ie4uinit.exe" -show >nul 2>&1
+if not "%SKIP_ICON_REFRESH%"=="1" (
+    echo Refreshing Windows icon cache (may restart Explorer)...
+    timeout /t 1 /nobreak >nul
+    tasklist /FI "IMAGENAME eq explorer.exe" | findstr /I "explorer.exe" >nul
+    if %ERRORLEVEL%==0 (
+        taskkill /IM explorer.exe /F >nul 2>&1
+        rem remove Explorer icon cache files (no admin required for local AppData)
+        del /F /Q "%localappdata%\Microsoft\Windows\Explorer\iconcache*" >nul 2>&1
+        del /F /Q "%localappdata%\IconCache.db" >nul 2>&1
+        start explorer.exe
+        rem try IE icon refresh helper if available
+        if exist "%windir%\system32\ie4uinit.exe" (
+            "%windir%\system32\ie4uinit.exe" -show >nul 2>&1
+        )
+    ) else (
+        rem Explorer not running? try ie4uinit anyway
+        if exist "%windir%\system32\ie4uinit.exe" (
+            "%windir%\system32\ie4uinit.exe" -show >nul 2>&1
+        )
     )
 ) else (
-    rem Explorer not running? try ie4uinit anyway
-    if exist "%windir%\system32\ie4uinit.exe" (
-        "%windir%\system32\ie4uinit.exe" -show >nul 2>&1
-    )
+    echo Skipping icon cache refresh (SKIP_ICON_REFRESH=1)
 )
 
 if errorlevel 1 (
@@ -147,7 +163,11 @@ if errorlevel 1 (
 
 echo Installation finished.
 echo Files copied to: %DEST%
-echo Desktop shortcuts created: Kommen, Gehen, WorkTimer
+if "%SKIP_DESKTOP_SHORTCUTS%"=="1" (
+    echo Desktop shortcuts creation: SKIPPED
+) else (
+    echo Desktop shortcuts created: Kommen, Gehen, WorkTimer
+)
 pause
 
 endlocal
