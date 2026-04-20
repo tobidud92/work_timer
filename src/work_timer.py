@@ -285,7 +285,12 @@ def _show_messagebox(title: str, message: str):
     # Prefer native Windows API when available (works in packaged exe)
     try:
         import ctypes
-        ctypes.windll.user32.MessageBoxW(0, str(message), str(title), 0)
+        # show top-most information box so hidden/desktop-launched processes still surface
+        MB_ICONINFORMATION = 0x40
+        MB_SETFOREGROUND  = 0x10000
+        MB_TOPMOST        = 0x40000
+        flags = MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST
+        ctypes.windll.user32.MessageBoxW(0, str(message), str(title), flags)
         return
     except Exception:
         pass
@@ -303,6 +308,20 @@ def _show_messagebox(title: str, message: str):
                 root.destroy()
             except Exception:
                 pass
+        return
+    except Exception:
+        pass
+
+    # Another robust non-blocking fallback using mshta popup (auto-closes after few seconds).
+    # mshta is generally available on Windows and creates a visible window even for
+    # processes started without a console. We spawn it asynchronously so the EXE can exit.
+    try:
+        import subprocess, shlex
+        esc_msg = str(message).replace('"', '\\"').replace('\n', ' ')
+        esc_title = str(title).replace('"', '\\"')
+        # Popup(timeout_seconds) - using 4 seconds display and information icon (64)
+        js = f"javascript:var sh=new ActiveXObject(\"WScript.Shell\"); sh.Popup(\"{esc_msg}\",4,\"{esc_title}\",64);close();"
+        subprocess.Popen(['mshta', js], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return
     except Exception:
         pass

@@ -5,10 +5,13 @@ rem Installer for work_timer (assumes this script and files are in the same fold
 rem Copies work_timer.exe and .ico files to %%USERPROFILE%%\Documents\Arbeitszeit
 rem Creates three desktop shortcuts: Kommen (--start-now), Gehen (--end-now), WorkTimer (no args)
 
+rem Change working directory to the script folder so paths with spaces/() are handled safely
+pushd "%~dp0" >nul
+set "SRC=%CD%\"
+
 rem Determine the user's Documents folder in a language-neutral way
 for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')"`) do set "DOCS=%%D"
 set "DEST=%DOCS%\Arbeitszeit"
-set "SRC=%~dp0"
 
 echo Installing Work Timer to %DEST%
 if not exist "%DEST%" (
@@ -148,3 +151,4 @@ echo Desktop shortcuts created: Kommen, Gehen, WorkTimer
 pause
 
 endlocal
+popd >nul
