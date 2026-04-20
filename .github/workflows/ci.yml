@@ -23,11 +23,14 @@ jobs:
           python -m pip install --upgrade pip
           if (Test-Path requirements.txt) {
             python -m pip install -r requirements.txt
+          } elseif (Test-Path code\requirements.txt) {
+            python -m pip install -r code\requirements.txt
           } else {
-            Write-Host 'No requirements.txt'
+            Write-Host 'No requirements.txt found at root or code/, installing minimal deps'
+            python -m pip install reportlab
           }
-          # Ensure test runner is available
-          python -m pip install pytest
+          # Ensure test runner and common optional deps are available
+          python -m pip install pytest reportlab prompt_toolkit
         shell: pwsh
 
       - name: Run tests
