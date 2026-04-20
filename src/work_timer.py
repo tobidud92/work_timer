@@ -1406,8 +1406,39 @@ def generate_pdf_report():
         table_data          = [['Datum', 'Typ', 'Start', 'Ende', 'Dauer (h)', 'Zuschlag', 'Tages-Δ']]
         current_table_style = list(table_style_base)
 
+        # Detect dates with multiple entries so we can render each interval as its own row
+        date_counts = {}
+        for e in monthly_data[month_year]:
+            date_counts[e.get('Datum', '')] = date_counts.get(e.get('Datum', ''), 0) + 1
+
+        # helper to lighten a HexColor by blending with white
+        def _lighten_color(hexcol, amount):
+            try:
+                r, g, b = int(hexcol.hexval[1:3], 16), int(hexcol.hexval[3:5], 16), int(hexcol.hexval[5:7], 16)
+            except Exception:
+                return hexcol
+            r = int(r + (255 - r) * amount)
+            g = int(g + (255 - g) * amount)
+            b = int(b + (255 - b) * amount)
+            return colors.HexColor('#{:02X}{:02X}{:02X}'.format(r, g, b))
+
+        # track per-date occurrence index so we can give the first interval a base color
+        occ_index_for_date = {}
         for entry in monthly_data[month_year]:
-            delta_val, delta_str, zuschlag_info = compute_day_delta(entry, holidays)
+            di = entry.get('Datum', '')
+            occ_index = occ_index_for_date.get(di, 0)
+            occ_index_for_date[di] = occ_index + 1
+
+            multiple_intervals = date_counts.get(di, 0) > 1
+
+            # For multiple intervals we show the interval duration in the Tages-Δ column
+            if multiple_intervals:
+                delta_val = 0.0
+                delta_str = sanitize_for_pdf(entry.get('Dauer', ''), max_len=20)
+                zuschlag_info = ''
+            else:
+                delta_val, delta_str, zuschlag_info = compute_day_delta(entry, holidays)
+
             table_data.append([
                 sanitize_for_pdf(to_display(entry.get('Datum', '')), max_len=20),
                 sanitize_for_pdf(entry.get('Typ', ''), max_len=20),
@@ -1417,18 +1448,30 @@ def generate_pdf_report():
                 sanitize_for_pdf(zuschlag_info, max_len=20),
                 sanitize_for_pdf(delta_str, max_len=20)
             ])
+
             row_index    = len(table_data) - 1
             day_type_key = entry.get('Typ', 'Arbeit')
+
+            # Determine background color. If the date has multiple intervals, derive
+            # a family of shades: the first interval keeps the base type color, later
+            # intervals get progressively lighter shades.
             if day_type_key in type_colors:
-                current_table_style.append(
-                    ('BACKGROUND', (0, row_index), (-1, row_index), type_colors[day_type_key])
-                )
-            if delta_val > 0:
-                current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_pos_color))
-                current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
-            elif delta_val < 0:
-                current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_neg_color))
-                current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
+                base_col = type_colors[day_type_key]
+                if multiple_intervals:
+                    shade_amount = min(0.0 + 0.20 * (occ_index if occ_index > 0 else 0), 0.65)
+                    bg_col = _lighten_color(base_col, shade_amount)
+                else:
+                    bg_col = base_col
+                current_table_style.append(('BACKGROUND', (0, row_index), (-1, row_index), bg_col))
+
+            # Color the Tages-Δ cell as before when it's an actual day delta
+            if not multiple_intervals:
+                if delta_val > 0:
+                    current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_pos_color))
+                    current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
+                elif delta_val < 0:
+                    current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_neg_color))
+                    current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
 
         col_widths = [1.05*inch, 1.05*inch, 0.65*inch, 0.65*inch, 0.75*inch, 0.85*inch, 0.85*inch]
         table = Table(table_data, colWidths=col_widths)
