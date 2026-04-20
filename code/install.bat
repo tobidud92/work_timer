@@ -7,7 +7,7 @@ rem Creates three desktop shortcuts: Kommen (--start-now), Gehen (--end-now), Wo
 
 rem Change working directory to the script folder so paths with spaces/() are handled safely
 pushd "%~dp0" >nul
-set "SRC=%CD%\"
+set "SRC=%CD%"
 
 rem Determine the user's Documents folder in a language-neutral way
 for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')"`) do set "DOCS=%%D"
@@ -24,24 +24,24 @@ if not exist "%DEST%" (
 )
 
 echo Checking required files in the installer folder...
-if not exist "%SRC%work_timer.exe" (
-    if not exist "%SRC%dist\work_timer.exe" (
-        echo ERROR: work_timer.exe not found in %SRC% or %SRC%dist\
+if not exist "%SRC%\work_timer.exe" (
+    if not exist "%SRC%\dist\work_timer.exe" (
+        echo ERROR: work_timer.exe not found in %SRC% or %SRC%\dist\
         pause
         exit /b 1
     )
 )
-if not exist "%SRC%Kommen.ico" (
+if not exist "%SRC%\Kommen.ico" (
     echo ERROR: Kommen.ico not found in %SRC%
     pause
     exit /b 1
 )
-if not exist "%SRC%Gehen.ico" (
+if not exist "%SRC%\Gehen.ico" (
     echo ERROR: Gehen.ico not found in %SRC%
     pause
     exit /b 1
 )
-if not exist "%SRC%WorkTimer.ico" (
+if not exist "%SRC%\WorkTimer.ico" (
     echo ERROR: WorkTimer.ico not found in %SRC%
     pause
     exit /b 1
@@ -49,23 +49,23 @@ if not exist "%SRC%WorkTimer.ico" (
 
 echo Copying files...
 rem Prefer built exe in a 'dist' subfolder if present (PyInstaller output)
-if exist "%SRC%dist\work_timer.exe" (
-    copy /Y "%SRC%dist\work_timer.exe" "%DEST%\" >nul
+if exist "%SRC%\dist\work_timer.exe" (
+    copy /Y "%SRC%\dist\work_timer.exe" "%DEST%\" >nul
 ) else (
-    copy /Y "%SRC%work_timer.exe" "%DEST%\" >nul
+    copy /Y "%SRC%\work_timer.exe" "%DEST%\" >nul
 )
-copy /Y "%SRC%Kommen.ico" "%DEST%\" >nul
-copy /Y "%SRC%Gehen.ico" "%DEST%\" >nul
-copy /Y "%SRC%WorkTimer.ico" "%DEST%\" >nul
+copy /Y "%SRC%\Kommen.ico" "%DEST%\" >nul
+copy /Y "%SRC%\Gehen.ico" "%DEST%\" >nul
+copy /Y "%SRC%\WorkTimer.ico" "%DEST%\" >nul
 rem Prefer canonical .ico files from repo data folder if present (when installer run from code/)
-if exist "%SRC%..\data\Kommen.ico" (
-    copy /Y "%SRC%..\data\Kommen.ico" "%DEST%" >nul
+if exist "%SRC%\..\data\Kommen.ico" (
+    copy /Y "%SRC%\..\data\Kommen.ico" "%DEST%" >nul
 )
-if exist "%SRC%..\data\Gehen.ico" (
-    copy /Y "%SRC%..\data\Gehen.ico" "%DEST%" >nul
+if exist "%SRC%\..\data\Gehen.ico" (
+    copy /Y "%SRC%\..\data\Gehen.ico" "%DEST%" >nul
 )
-if exist "%SRC%..\data\WorkTimer.ico" (
-    copy /Y "%SRC%..\data\WorkTimer.ico" "%DEST%" >nul
+if exist "%SRC%\..\data\WorkTimer.ico" (
+    copy /Y "%SRC%\..\data\WorkTimer.ico" "%DEST%" >nul
 )
 
 rem Create small wrapper batch files that call the EXE and log stdout/stderr to Desktop
