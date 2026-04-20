@@ -1801,12 +1801,8 @@ def settings_menu():
         print('Ungültige Eingabe.')
 
 if __name__ == "__main__":
-    ensure_user_name()
-    # ensure manual holidays are present in config.json (single source of truth)
-    ensure_holidays_in_config()
-
     # Support quick desktop shortcuts that call the exe with --start-now / --end-now
-    # These should perform the action immediately and exit without showing the menu.
+    # Parse CLI args first so quick actions can run without interactive prompts.
     import argparse
 
     parser = argparse.ArgumentParser(add_help=False)
@@ -1825,12 +1821,18 @@ if __name__ == "__main__":
         except Exception:
             pass
 
+    # If invoked as quick-action, perform and exit before prompting for name/config
     if args.start_now:
         quick_start_action()
         sys.exit(0)
     if args.end_now:
         quick_end_action()
         sys.exit(0)
+
+    # Normal interactive run
+    ensure_user_name()
+    # ensure manual holidays are present in config.json (single source of truth)
+    ensure_holidays_in_config()
 
     running = True
     while running:
