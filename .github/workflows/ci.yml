@@ -48,10 +48,8 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'WorkTimerInstall_test\\*' -DestinationPath 'WorkTimerInstall_test.zip' -Force"
         shell: pwsh
 
-      - name: Upload installer artifacts
+      - name: Upload installer artifact (ZIP only)
         uses: actions/upload-artifact@v4
         with:
-          name: WorkTimerInstall_test
-          path: |
-            WorkTimerInstall_test
-            WorkTimerInstall_test.zip
+          name: WorkTimerInstall_test_zip
+          path: WorkTimerInstall_test.zip
