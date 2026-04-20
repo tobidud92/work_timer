@@ -282,14 +282,36 @@ def _show_messagebox(title: str, message: str):
 
     Falls nicht unter Windows oder MessageBox nicht verfügbar, fällt es auf print zurück.
     """
+    # Prefer native Windows API when available (works in packaged exe)
     try:
         import ctypes
         ctypes.windll.user32.MessageBoxW(0, str(message), str(title), 0)
+        return
     except Exception:
+        pass
+
+    # Fallback to tkinter.messagebox if available (works in many Python installs)
+    try:
+        import tkinter as _tk
+        from tkinter import messagebox as _msg
         try:
-            print(f"{title}: {message}")
-        except Exception:
-            pass
+            root = _tk.Tk()
+            root.withdraw()
+            _msg.showinfo(str(title), str(message))
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+        return
+    except Exception:
+        pass
+
+    # Final fallback: print to stdout/stderr
+    try:
+        print(f"{title}: {message}")
+    except Exception:
+        pass
 
 
 def _get_last_checkout_time(data):
