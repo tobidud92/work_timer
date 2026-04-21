@@ -104,17 +104,13 @@ $robocopyArgs = @($binDir, $Dest, '/E', '/IS', '/IT') +
                 @('/XF') + $protectedFiles +
                 @('/XD') + $protectedDirs +
                 @('/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
-# Use Start-Process with file redirects to avoid the PowerShell pipeline deadlock.
-# Both "| Out-Null" and "*> $null" still route through the PS pipeline buffer,
-# which deadlocks when robocopy emits large output on reinstall.
+# Use -WindowStyle Hidden so robocopy output goes nowhere (hidden window, no
+# pipeline buffer). Avoids both the "| Out-Null" deadlock and the
+# Start-Process -NoNewWindow -RedirectStd* deadlock seen on some Windows versions.
 Write-Host 'Kopiere Programmdateien...' -NoNewline
-$tmpOut = [System.IO.Path]::GetTempFileName()
-$tmpErr = [System.IO.Path]::GetTempFileName()
 $proc = Start-Process -FilePath 'robocopy' -ArgumentList $robocopyArgs `
-    -Wait -NoNewWindow -PassThru `
-    -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
+    -Wait -WindowStyle Hidden -PassThru
 $robocopyExit = $proc.ExitCode
-Remove-Item $tmpOut, $tmpErr -ErrorAction SilentlyContinue
 Write-DebugLog "robocopy exit code: $robocopyExit"
 if ($robocopyExit -ge 8) {
     # robocopy exit codes 0-7 are success; 8+ are errors
