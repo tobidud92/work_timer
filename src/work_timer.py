@@ -1010,14 +1010,16 @@ def compute_day_delta(entry, manually_entered_holidays=None):
             except ValueError:
                 return 0.0, '—', ''
             netto = calculate_netto_hours(brutto)
+            pause_d = BREAK_DURATION_HOURS if brutto > BREAK_THRESHOLD_HOURS else 0.0
             if typ == 'Sonderarbeit' or day_type in ('saturday', 'sunday', 'holiday'):
                 netto_mit_zuschlag = apply_surcharge(netto, day_type)
-                if day_type == 'saturday':
-                    zuschlag_info = '+50% Sa'
-                elif day_type in ('sunday', 'holiday'):
-                    zuschlag_info = '+100% So/Ft'
+                surcharge_h = netto_mit_zuschlag - netto
+                net_adj = surcharge_h - pause_d
+                zuschlag_info = (f'+{net_adj:.2f} h' if net_adj >= 0 else f'{net_adj:.2f} h')
                 delta = netto_mit_zuschlag
             else:
+                if pause_d > 0:
+                    zuschlag_info = f'-{pause_d:.2f} h'
                 delta = netto - DAILY_HOURS
             delta_str = f"+{delta:.2f} h" if delta >= 0 else f"{delta:.2f} h"
             return delta, delta_str, zuschlag_info
@@ -1555,13 +1557,14 @@ def generate_pdf_report():
 
     # --- Farben ---
     type_colors = {
-        'Arbeit':        colors.HexColor('#E6FFE6'),
-        'Sonderarbeit':  colors.HexColor('#FFE6FF'),
-        'Urlaub':        colors.HexColor('#FFF2E6'),
-        'Feiertag':      colors.HexColor('#E6F2FF'),
-        'Zeitausgleich': colors.HexColor('#FFFFE6'),
-        'Header':        colors.HexColor('#CCCCCC'),
-        'MultiCheckin':  colors.HexColor('#5BA8D4'),  # distinct teal-blue for multi-checkin days
+        'Arbeit':           colors.HexColor('#E6FFE6'),
+        'Sonderarbeit':     colors.HexColor('#FFE6FF'),
+        'Urlaub':           colors.HexColor('#FFF2E6'),
+        'Feiertag':         colors.HexColor('#E6F2FF'),
+        'Zeitausgleich':    colors.HexColor('#FFFFE6'),
+        'Header':           colors.HexColor('#CCCCCC'),
+        'MultiCheckin':     colors.HexColor('#C39BD3'),  # purple for first shift of multi-checkin day
+        'MultiCheckinLight':colors.HexColor('#E8D5F0'),  # light purple for subsequent shifts
     }
     delta_pos_color = colors.HexColor('#006600')
     delta_neg_color = colors.HexColor('#CC0000')
@@ -1728,7 +1731,7 @@ def generate_pdf_report():
         story.append(Spacer(1, 0.08 * inch))
 
         # Detailtabelle
-        table_data          = [['Datum', 'Typ', 'Start', 'Ende', 'Dauer (h)', 'Zuschlag', 'Tages-Δ']]
+        table_data          = [['Datum', 'Typ', 'Start', 'Ende', 'Dauer (h)', 'Zuschlag / Abzug', 'Tages-Δ']]
         current_table_style = list(table_style_base)
 
         # Detect dates with multiple entries so we can render each interval as its own row
@@ -1749,7 +1752,22 @@ def generate_pdf_report():
             b = int(b + (255 - b) * amount)
             return colors.HexColor('#{:02X}{:02X}{:02X}'.format(r, g, b))
 
-        # track per-date occurrence index so we can give the first interval a base color
+        # Pre-aggregate multi-checkin day totals for correct delta computation.
+        # Pause is deducted only ONCE from the day total, not per interval.
+        multi_day_stats = {}  # date_internal -> {total_brutto, day_type}
+        for di, cnt in date_counts.items():
+            if cnt > 1:
+                total_b = sum(
+                    float(e.get('Dauer') or 0)
+                    for e in monthly_data[month_year]
+                    if e.get('Datum') == di and e.get('Typ') == 'Arbeit' and e.get('Dauer')
+                )
+                multi_day_stats[di] = {
+                    'total_brutto': total_b,
+                    'day_type': get_day_type_info(di, holidays),
+                }
+
+        # track per-date occurrence index (0-based) for color assignment
         occ_index_for_date = {}
         for entry in monthly_data[month_year]:
             di = entry.get('Datum', '')
@@ -1757,12 +1775,28 @@ def generate_pdf_report():
             occ_index_for_date[di] = occ_index + 1
 
             multiple_intervals = date_counts.get(di, 0) > 1
+            is_first_of_date   = occ_index == 0
 
-            # For multiple intervals we show the interval duration in the Tages-Δ column
-            if multiple_intervals:
-                delta_val = 0.0
-                delta_str = sanitize_for_pdf(entry.get('Dauer', ''), max_len=20)
-                zuschlag_info = ''
+            if multiple_intervals and entry.get('Typ') == 'Arbeit':
+                # Only the first row carries the aggregated delta and zuschlag for the day
+                if is_first_of_date:
+                    stats     = multi_day_stats.get(di, {})
+                    total_b   = stats.get('total_brutto', 0.0)
+                    day_type  = stats.get('day_type', 'weekday')
+                    netto     = calculate_netto_hours(total_b)
+                    pause_d   = BREAK_DURATION_HOURS if total_b > BREAK_THRESHOLD_HOURS else 0.0
+                    if day_type in ('saturday', 'sunday', 'holiday'):
+                        netto_s     = apply_surcharge(netto, day_type)
+                        surcharge_h = netto_s - netto
+                        net_adj     = surcharge_h - pause_d
+                        zuschlag_info = (f'+{net_adj:.2f} h' if net_adj >= 0 else f'{net_adj:.2f} h')
+                        delta_val   = netto_s
+                    else:
+                        zuschlag_info = f'-{pause_d:.2f} h' if pause_d > 0 else ''
+                        delta_val   = netto - DAILY_HOURS
+                    delta_str = f'+{delta_val:.2f} h' if delta_val >= 0 else f'{delta_val:.2f} h'
+                else:
+                    delta_val, delta_str, zuschlag_info = 0.0, '', ''
             else:
                 delta_val, delta_str, zuschlag_info = compute_day_delta(entry, holidays)
 
@@ -1779,30 +1813,22 @@ def generate_pdf_report():
             row_index    = len(table_data) - 1
             day_type_key = entry.get('Typ', 'Arbeit')
 
-            # Determine background color.
-            # Days with multiple Arbeit intervals get a distinct teal-blue family:
-            #   first entry  → full saturation base color
-            #   later entries → progressively lighter shades of the same hue
+            # Background color:
+            # Multi-checkin Arbeit: purple for first interval, light purple for the rest
             if multiple_intervals and day_type_key == 'Arbeit':
-                base_col = type_colors['MultiCheckin']
+                bg_col = type_colors['MultiCheckin'] if is_first_of_date else type_colors['MultiCheckinLight']
             else:
-                base_col = type_colors.get(day_type_key)
-            if base_col is not None:
-                if multiple_intervals:
-                    shade_amount = min(0.30 * occ_index, 0.65)
-                    bg_col = _lighten_color(base_col, shade_amount)
-                else:
-                    bg_col = base_col
+                bg_col = type_colors.get(day_type_key)
+            if bg_col is not None:
                 current_table_style.append(('BACKGROUND', (0, row_index), (-1, row_index), bg_col))
 
-            # Color the Tages-Δ cell as before when it's an actual day delta
-            if not multiple_intervals:
-                if delta_val > 0:
-                    current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_pos_color))
-                    current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
-                elif delta_val < 0:
-                    current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_neg_color))
-                    current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
+            # Color the Tages-Δ cell
+            if delta_val > 0:
+                current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_pos_color))
+                current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
+            elif delta_val < 0:
+                current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_neg_color))
+                current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
 
         col_widths = [1.05*inch, 1.05*inch, 0.65*inch, 0.65*inch, 0.75*inch, 0.85*inch, 0.85*inch]
         table = Table(table_data, colWidths=col_widths)
