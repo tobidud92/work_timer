@@ -1,89 +1,101 @@
 # Work Timer — Bedienungsanleitung
 
-Kurze Anleitung zur Nutzung des kleinen Arbeitszeit-Trackers.
-
-Installation
-
-- Lege ein virtuelles Environment an und installiere Abhängigkeiten (ReportLab und optional `prompt_toolkit`):
-
-CI: [![CI](https://github.com/tobidud92/work_timer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tobidud92/work_timer/actions/workflows/ci.yml)
-
-# Work Timer — Bedienungsanleitung
+[![CI](https://github.com/tobidud92/work_timer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tobidud92/work_timer/actions/workflows/ci.yml)
 
 Kurze Anleitung zur Nutzung des kleinen Arbeitszeit-Trackers.
 
-Installation
+---
 
-- Lege ein virtuelles Environment an und installiere Abhängigkeiten (ReportLab und optional `prompt_toolkit`):
+## Installation
+
+### Option A — Fertige Windows-Exe (empfohlen)
+
+1. Lade das neueste Artefakt `WorkTimerInstall.zip` von der [CI-Seite](https://github.com/tobidud92/work_timer/actions/workflows/ci.yml) herunter (letzter grüner Lauf → Artefakte) oder das offizielle Release-ZIP von der [Releases-Seite](https://github.com/tobidud92/work_timer/releases).
+2. Entpacke das ZIP an einen beliebigen Ort.
+3. Doppelklicke auf `install.bat`. Das Skript:
+   - Entsperrt alle Dateien (hebt den Windows-Download-Block auf)
+   - Kopiert `work_timer.exe` und Icons nach `%USERPROFILE%\Documents\Arbeitszeit`
+   - Erstellt Desktop-Shortcuts `Kommen.lnk`, `Gehen.lnk`, `WorkTimer.lnk`
+
+### Option B — Aus dem Quellcode (Entwickler)
 
 ```powershell
 python -m venv .venv
 & .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+python src\work_timer.py
 ```
 
-Hinweis zur interaktiven Datumsauswahl
+---
 
-- Für die interaktive Datumsauswahl (Up/Down zum Wechseln des Datums) wird `prompt_toolkit` benötigt. `requirements.txt` listet `prompt_toolkit>=3.0`.
-- Wenn du eine Windows-Exe mit PyInstaller baust, installiere vorher die Anforderungen in der Build-Umgebung, damit PyInstaller `prompt_toolkit` analysieren und in die Executable einbinden kann.
-
-Start
-
-- Starte das Script (aus dem Projekt-Root):
+## Start
 
 ```powershell
 & .venv\Scripts\Activate.ps1
 python src\work_timer.py
 ```
 
-Hauptmenü (Kurzüberblick)
+Oder direkt die installierte Exe über den Desktop-Shortcut `WorkTimer` starten.
 
-- `1` Arbeitsbeginn erfassen (jetzt)
-- `2` Arbeitsende erfassen (jetzt)
-- `3` Zeitsaldo anzeigen
-- `4` Report als PDF erstellen
-- `5` Arbeitsbeginn korrigieren (korrigieren / nachtragen)
-- `6` Arbeitsende korrigieren (korrigieren / nachtragen)
-- `7` Einstellungen / Optionen (Urlaub, Feiertag, Korrekturen, Import, Backup)
-- `8` Beenden
+---
 
-Einstellungen / Optionen (im Untermenü)
+## Hauptmenü
 
-- `1` Urlaubstag eintragen
-- `2` Feiertag eintragen (speichert in `config.json`)
-- `3` Zeitausgleichstag eintragen
-- `4` Arbeitsbeginn/Ende korrigieren
-- `5` Sonderarbeit erfassen (Sa/So/Feiertag)
-- `6` Feiertage anzeigen (aktuelles Jahr)
-- `7` Feiertage aus CSV importieren (two-column CSV: `Datum,Name`)
-- `8` Config-Backup wiederherstellen
-- `9` Name ändern
-- `0` Zurück
+| Taste | Funktion |
+|-------|----------|
+| `1` | Arbeitsbeginn erfassen (jetzt) |
+| `2` | Arbeitsende erfassen (jetzt) |
+| `3` | Zeitsaldo anzeigen |
+| `4` | Report als PDF erstellen |
+| `5` | Arbeitsbeginn korrigieren (korrigieren / nachtragen) |
+| `6` | Arbeitsende korrigieren (korrigieren / nachtragen) |
+| `7` | Einstellungen / Optionen |
+| `8` | Beenden |
 
-Interaktive Datums- und Zeiteingabe
+---
 
-- Wenn `prompt_toolkit` installiert ist, zeigt die Datumseingabe eine interaktive Maske an, in der `Up`/`Down` das Datum ändert und `Left`/`Right` den Cursor bewegt. Ohne `prompt_toolkit` wird ein einfacher Eingabeprompt mit einem vorausgefüllten Datum angezeigt.
-- Zeit-Eingaben (Format `HH:MM`) werden standardmäßig mit der aktuellen Zeit vorausgefüllt. Bei installiertem `prompt_toolkit` lassen sich Minuten per `Up`/`Down` anpassen.
- - Lässt du die Datumseingabe leer, wird standardmäßig das aktuelle Datum verwendet.
+## Einstellungen / Optionen (Untermenü 7)
 
-Quick‑Shortcuts (Desktop)
+| Taste | Funktion |
+|-------|----------|
+| `1` | Urlaubstag eintragen |
+| `2` | Feiertag eintragen (speichert in `config.json`) |
+| `3` | Zeitausgleichstag eintragen |
+| `4` | Arbeitsbeginn/Ende korrigieren |
+| `5` | Sonderarbeit erfassen (Sa/So/Feiertag) |
+| `6` | Feiertage anzeigen (aktuelles Jahr) |
+| `7` | Feiertage aus CSV importieren (`Datum,Name`) |
+| `8` | Config-Backup wiederherstellen |
+| `9` | Name ändern |
+| `0` | Zurück |
 
-- `install\install.ps1` ist der Installer: er kopiert die benötigten Dateien nach `%USERPROFILE%\Documents\Arbeitszeit`, legt wrapper-`.bat`- und `.vbs`-Dateien an (`kommen.bat` / `gehen.bat`) die die Exe mit `--start-now` bzw. `--end-now` aufrufen, und erstellt Desktop-Shortcuts (`Kommen.lnk`, `Gehen.lnk`, `WorkTimer.lnk`). Aufruf:
+---
 
-```powershell
-# Aus dem Repo-Root (erstellt Shortcuts + kopiert Dateien in Dokumente\Arbeitszeit)
-pwsh -NoProfile -ExecutionPolicy Bypass -File install\install.ps1
-```
+## Quick-Shortcuts (Desktop)
 
-- Alternativ gibt es `install\create_shortcuts.ps1` zum gezielten Anlegen von Shortcuts (z.B. wenn du die Exe bereits an einem bestimmten Ort hast):
+Nach der Installation gibt es drei Desktop-Verknüpfungen:
 
-```powershell
-& .\install\create_shortcuts.ps1 -ExePath "C:\Path\To\dist\work_timer.exe"
-```
+| Shortcut | Aktion |
+|----------|--------|
+| `Kommen.lnk` | Startet `work_timer.exe --start-now` und zeigt eine Bestätigungsmeldung |
+| `Gehen.lnk` | Startet `work_timer.exe --end-now` und zeigt eine Bestätigungsmeldung |
+| `WorkTimer.lnk` | Öffnet das interaktive Hauptmenü |
 
-Build / Exe erstellen
+Die Quick-Action-Shortcuts öffnen ein minimiertes Konsolenfenster, führen die Aktion durch, zeigen eine **MessageBox** mit Feedback (z. B. „Eingecheckt: 21.04.2026 um 08:00") und beenden sich dann automatisch.
 
-- Empfohlener Ablauf (aus Projekt-Root):
+---
+
+## Interaktive Datums- und Zeiteingabe
+
+- Mit installiertem `prompt_toolkit` zeigt die Datumseingabe eine interaktive Maske:
+  - `Up` / `Down` wechselt den Tag
+  - `Left` / `Right` bewegt den Cursor für manuelle Eingabe
+- Zeiteingaben (Format `HH:MM`) werden mit der aktuellen Zeit vorausgefüllt; `Up`/`Down` ändert die Minuten.
+- Lässt du die Datumseingabe leer, wird automatisch das heutige Datum verwendet.
+
+---
+
+## Build (Exe selbst erstellen)
 
 ```powershell
 & .venv\Scripts\Activate.ps1
@@ -91,24 +103,22 @@ pip install -r requirements.txt
 pyinstaller install\work_timer.spec
 ```
 
-- Wenn du eigene Hooks einbinden musst, sind diese in `install\pyinstaller-hooks\` abgelegt. PyInstaller wird mit dem Spec-File aufgerufen, das `--additional-hooks-dir` bereits enthält.
+Die Exe landet unter `dist\work_timer.exe`.
 
-Tests
+---
 
-- Unit-Tests liegen im Ordner `tests/`. Führe sie mit:
+## Tests
 
 ```powershell
 & .venv\Scripts\Activate.ps1
-python -m unittest discover -v tests
+python -m pytest
 ```
 
-Wichtige Hinweise
+---
 
-- `config.json` ist die Single-Source-of-Truth für manuell eingetragene Feiertage (`holidays` mapping).
+## Wichtige Hinweise
+
+- `config.json` ist die einzige Quelle für manuell eingetragene Feiertage (`holidays`-Mapping).
 - Interaktive Ja/Nein-Abfragen akzeptieren `j` (Deutsch) oder `y` (Englisch).
-- Beim CSV-Schreiben werden führende Zeichen (`=`, `+`, `-`, `@`) mit einem führenden `'` escaped, damit Tabellenprogramme keine Formeln ausführen.
-- Schreiboperationen für Daten und Config sind atomar implementiert (Zwischendatei + `os.replace`).
-
-Support
-
-- Bei Bedarf kann das Tool zu SQLite migriert werden oder weitere Regionen/Feiertage ergänzt werden.
+- Schreiboperationen für Daten und Config sind atomar (`os.replace`), sodass keine korrupten Dateien entstehen.
+- Beim CSV-Schreiben werden Zeichen wie `=`, `+`, `-`, `@` am Zeilenanfang escaped, um CSV-Injection in Tabellenkalkulationen zu verhindern.
