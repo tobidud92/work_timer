@@ -35,28 +35,13 @@ Describe 'install.ps1 (real installer)' {
         Test-Path (Join-Path $script:dest 'WorkTimer.ico')              | Should Be $true
     }
 
-    It 'creates kommen.bat and gehen.bat wrapper scripts in Dest' {
+    It 'does not create .bat or .vbs wrapper files in Dest (shortcuts point directly to exe)' {
         $installer = Join-Path $script:repoRoot 'install\install.ps1'
         & $installer -Source $script:source -Dest $script:dest -SkipShortcuts
 
-        Test-Path (Join-Path $script:dest 'kommen.bat') | Should Be $true
-        Test-Path (Join-Path $script:dest 'gehen.bat')  | Should Be $true
-    }
-
-    It 'creates kommen.vbs and gehen.vbs wrapper scripts in Dest' {
-        $installer = Join-Path $script:repoRoot 'install\install.ps1'
-        & $installer -Source $script:source -Dest $script:dest -SkipShortcuts
-
-        Test-Path (Join-Path $script:dest 'kommen.vbs') | Should Be $true
-        Test-Path (Join-Path $script:dest 'gehen.vbs')  | Should Be $true
-    }
-
-    It 'bat wrappers reference the installed exe path' {
-        $installer = Join-Path $script:repoRoot 'install\install.ps1'
-        & $installer -Source $script:source -Dest $script:dest -SkipShortcuts
-
-        $exeRef = Join-Path $script:dest 'work_timer.exe'
-        (Get-Content (Join-Path $script:dest 'kommen.bat') -Raw) | Should Match ([regex]::Escape($exeRef))
-        (Get-Content (Join-Path $script:dest 'gehen.bat')  -Raw) | Should Match ([regex]::Escape($exeRef))
+        Test-Path (Join-Path $script:dest 'kommen.bat') | Should Be $false
+        Test-Path (Join-Path $script:dest 'gehen.bat')  | Should Be $false
+        Test-Path (Join-Path $script:dest 'kommen.vbs') | Should Be $false
+        Test-Path (Join-Path $script:dest 'gehen.vbs')  | Should Be $false
     }
 }

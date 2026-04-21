@@ -53,49 +53,28 @@ if ($workico) { Copy-Item -Path $workico.FullName -Destination $Dest -Force }
 
 Write-DebugLog "Files copied to $Dest"
 
-# Create wrappers
-$kommenBat = Join-Path $Dest 'kommen.bat'
-$gehenBat = Join-Path $Dest 'gehen.bat'
-$kommenVbs = Join-Path $Dest 'kommen.vbs'
-$gehenVbs = Join-Path $Dest 'gehen.vbs'
 $exePath = Join-Path $Dest 'work_timer.exe'
-
-"@echo off" | Out-File -FilePath $kommenBat -Encoding ASCII
-('"{0}" --start-now --log-file "{1}\Desktop\work_timer_quick.log"' -f $exePath, $env:USERPROFILE) | Out-File -FilePath $kommenBat -Encoding ASCII -Append
-"exit /b" | Out-File -FilePath $kommenBat -Encoding ASCII -Append
-
-"@echo off" | Out-File -FilePath $gehenBat -Encoding ASCII
-('"{0}" --end-now --log-file "{1}\Desktop\work_timer_quick.log"' -f $exePath, $env:USERPROFILE) | Out-File -FilePath $gehenBat -Encoding ASCII -Append
-"exit /b" | Out-File -FilePath $gehenBat -Encoding ASCII -Append
-
-# VBS wrappers (Chr(34) produces a double-quote in VBScript)
-$vb1 = @"
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run Chr(34) & "$exePath" & Chr(34) & " --start-now --log-file Chr(34) & ""$env:USERPROFILE\Desktop\work_timer_quick.log"" & Chr(34)", 0, False
-"@
-$vb1 | Out-File -FilePath $kommenVbs -Encoding ASCII
-
-$vb2 = @"
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run Chr(34) & "$exePath" & Chr(34) & " --end-now --log-file Chr(34) & ""$env:USERPROFILE\Desktop\work_timer_quick.log"" & Chr(34)", 0, False
-"@
-$vb2 | Out-File -FilePath $gehenVbs -Encoding ASCII
 
 # Create shortcuts unless skipped
 if (-not $SkipShortcuts) {
     try {
         $w = New-Object -ComObject WScript.Shell
         $desktop = [Environment]::GetFolderPath('Desktop')
+
         $s = $w.CreateShortcut((Join-Path $desktop 'Kommen.lnk'))
-        $s.TargetPath = $kommenVbs
+        $s.TargetPath = $exePath
+        $s.Arguments = '--start-now'
         $s.IconLocation = (Join-Path $Dest 'Kommen.ico') + ',0'
         $s.WorkingDirectory = $Dest
+        $s.WindowStyle = 7  # SW_SHOWMINNOACTIVE: starts minimized, no console flash in foreground
         $s.Save()
 
         $s = $w.CreateShortcut((Join-Path $desktop 'Gehen.lnk'))
-        $s.TargetPath = $gehenVbs
+        $s.TargetPath = $exePath
+        $s.Arguments = '--end-now'
         $s.IconLocation = (Join-Path $Dest 'Gehen.ico') + ',0'
         $s.WorkingDirectory = $Dest
+        $s.WindowStyle = 7
         $s.Save()
 
         $s = $w.CreateShortcut((Join-Path $desktop 'WorkTimer.lnk'))
