@@ -15,6 +15,31 @@ function Write-DebugLog {
 
 Write-DebugLog "Installer started. Source=$Source"
 
+# Copy a file to a destination folder, retrying on transient locks (e.g. Explorer holding .ico).
+function Copy-FileRetry {
+    param(
+        [string]$SrcPath,
+        [string]$DestDir,
+        [int]$Retries = 6,
+        [int]$DelayMs = 300
+    )
+    $destFile = Join-Path $DestDir (Split-Path $SrcPath -Leaf)
+    for ($i = 0; $i -lt $Retries; $i++) {
+        try {
+            Copy-Item -Path $SrcPath -Destination $DestDir -Force -ErrorAction Stop
+            return
+        } catch [System.IO.IOException] {
+            if ($i -lt ($Retries - 1)) {
+                Write-DebugLog ("Copy locked, retry {0}/{1}: {2}" -f ($i+1), $Retries, $SrcPath)
+                Start-Sleep -Milliseconds $DelayMs
+            } else {
+                Write-DebugLog ("Copy failed after $Retries retries: $SrcPath")
+                throw
+            }
+        }
+    }
+}
+
 # Normalize Source
 $Source = (Resolve-Path -Path $Source).ProviderPath
 
@@ -46,10 +71,10 @@ $gehen = Get-ChildItem -Path $Source -Filter 'Gehen.ico' -Recurse -ErrorAction S
 $workico = Get-ChildItem -Path $Source -Filter 'WorkTimer.ico' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
 
 # Copy files
-Copy-Item -Path $exe.FullName -Destination $Dest -Force
-if ($kommen) { Copy-Item -Path $kommen.FullName -Destination $Dest -Force }
-if ($gehen)  { Copy-Item -Path $gehen.FullName -Destination $Dest -Force }
-if ($workico) { Copy-Item -Path $workico.FullName -Destination $Dest -Force }
+Copy-FileRetry -SrcPath $exe.FullName -DestDir $Dest
+if ($kommen)  { Copy-FileRetry -SrcPath $kommen.FullName  -DestDir $Dest }
+if ($gehen)   { Copy-FileRetry -SrcPath $gehen.FullName   -DestDir $Dest }
+if ($workico) { Copy-FileRetry -SrcPath $workico.FullName -DestDir $Dest }
 
 Write-DebugLog "Files copied to $Dest"
 
