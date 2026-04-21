@@ -31,8 +31,8 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'WorkTimerInstall_release\\*' -DestinationPath 'WorkTimerInstall_release.zip' -Force"
         shell: pwsh
 
-      - name: Optional: Sign executable (requires secrets.PFX_BASE64 and secrets.PFX_PASSWORD)
-        if: ${{ secrets.PFX_BASE64 && secrets.PFX_PASSWORD }}
+      - name: "Optional: Sign executable (requires secrets.PFX_BASE64 and secrets.PFX_PASSWORD)"
+        if: ${{ secrets.PFX_BASE64 != '' && secrets.PFX_PASSWORD != '' }}
         run: |
           Write-Host 'Decoding PFX and attempting to sign executable(s)'
           $pfxPath = "agent_temp_cert.pfx"
