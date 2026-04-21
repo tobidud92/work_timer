@@ -17,41 +17,65 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install runtime + test dependencies
         run: |
           python -m pip install --upgrade pip
-          if (Test-Path requirements.txt) { python -m pip install -r requirements.txt } else { Write-Host 'No requirements.txt' }
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
         shell: pwsh
 
-      - name: Build executable
+      - name: Run tests
+        run: python -m pytest -q
+        shell: pwsh
+
+      - name: Install PyInstaller
+        run: python -m pip install pyinstaller
+        shell: pwsh
+
+      - name: Build executables (onedir)
         run: |
-          python -m pip install pyinstaller
-          pyinstaller install/work_timer.spec --distpath dist --workpath build
+          # Produces dist/work_timer/ containing:
+          #   work_timer.exe        - full interactive app
+          #   work_timer_quick.exe  - slim Kommen/Gehen (fast, windowless)
+          #   _internal/            - shared DLLs and .pyd files
+          pyinstaller install/work_timer.spec --distpath dist --workpath build --clean
+        shell: pwsh
+
+      - name: Verify build outputs
+        run: |
+          if (-not (Test-Path dist\work_timer\work_timer.exe))       { Write-Error 'work_timer.exe missing';       exit 1 }
+          if (-not (Test-Path dist\work_timer\work_timer_quick.exe)) { Write-Error 'work_timer_quick.exe missing'; exit 1 }
+          Write-Host "Build OK:"
+          Get-ChildItem dist\work_timer\*.exe | Select-Object Name, @{N='KB';E={[math]::Round($_.Length/1KB)}}
         shell: pwsh
 
       - name: Generate installer folder
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\\install\\generate_install_folder.ps1 -OutDir WorkTimerInstall_release -Force
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\install\generate_install_folder.ps1 -OutDir WorkTimerInstall_release -Force
         shell: pwsh
 
       - name: Compress installer folder
-        run: powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'WorkTimerInstall_release\\*' -DestinationPath 'WorkTimerInstall_release.zip' -Force"
+        run: |
+          # Preserves WorkTimerInstall_release\work_timer\ structure inside the ZIP.
+          # User extracts ZIP and runs install.bat from the root.
+          Compress-Archive -Path 'WorkTimerInstall_release\*' -DestinationPath 'WorkTimerInstall_release.zip' -Force
         shell: pwsh
 
-      - name: "Optional: Sign executable (requires secrets.PFX_BASE64 and secrets.PFX_PASSWORD)"
+      - name: "Optional: Sign executables (requires secrets.PFX_BASE64 and secrets.PFX_PASSWORD)"
         if: env.PFX_BASE64 != '' && env.PFX_PASSWORD != ''
         env:
           PFX_BASE64: ${{ secrets.PFX_BASE64 }}
           PFX_PASSWORD: ${{ secrets.PFX_PASSWORD }}
         run: |
-          Write-Host 'Decoding PFX and attempting to sign executable(s)'
+          Write-Host 'Decoding PFX and signing executables'
           $pfxPath = "agent_temp_cert.pfx"
           [System.IO.File]::WriteAllBytes($pfxPath, [System.Convert]::FromBase64String($env:PFX_BASE64))
-          $pwd = $env:PFX_PASSWORD
+          # Signs both work_timer.exe and work_timer_quick.exe
           $files = Get-ChildItem -Path WorkTimerInstall_release -Filter *.exe -File -Recurse
           foreach ($f in $files) {
               Write-Host "Signing $($f.FullName)"
-              signtool sign /f $pfxPath /p $pwd /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $f.FullName
+              signtool sign /f $pfxPath /p $env:PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $f.FullName
           }
+          Remove-Item $pfxPath -Force
         shell: pwsh
 
       - name: Create GitHub release and upload ZIP
