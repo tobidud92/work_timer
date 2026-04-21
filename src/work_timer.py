@@ -349,64 +349,101 @@ def quick_start_action():
     data = load_data()
     _log_quick_action('start', 'begin', '')
     today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
-    today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
-    now_str = datetime.now().strftime(TIME_FORMAT)
-    today_entry = get_entry_by_date(data, today_internal)
+    today_display  = datetime.now().strftime(DATE_FORMAT_DISPLAY)
+    now_str        = datetime.now().strftime(TIME_FORMAT)
 
-    if today_entry:
-        if today_entry.get('Typ') == 'Arbeit' and today_entry.get('Startzeit'):
-            # already checked in
-            _show_messagebox('Bereits eingecheckt', f"Sie sind bereits am {today_display} um {today_entry['Startzeit']} eingecheckt.")
-            _log_quick_action('start', 'skipped', f"already checked in {today_entry.get('Startzeit')}")
-            return
-        if today_entry.get('Typ') != 'Arbeit':
-            _show_messagebox('Eintrag-Konflikt', f"Für {today_display} existiert ein Eintrag vom Typ '{today_entry.get('Typ')}'. Bitte überprüfen.")
-            _log_quick_action('start', 'error', f"entry conflict type={today_entry.get('Typ')}")
-            return
-        # entry exists but no starttime -> set it
-        today_entry['Startzeit'] = now_str
-        today_entry['Dauer'] = calculate_duration(today_entry.get('Startzeit', ''), today_entry.get('Endzeit', ''))
-        save_data(data)
-        _log_quick_action('start', 'ok', f"start {now_str}")
-        _show_messagebox('Eingecheckt', f"Eingecheckt: {today_display} um {now_str}.")
+    # Check for a non-Arbeit entry that would block check-in
+    non_arbeit = next((e for e in get_entries_by_date(data, today_internal)
+                       if e.get('Typ') not in ('Arbeit', None, '')), None)
+    if non_arbeit:
+        _show_messagebox('Eintrag-Konflikt',
+                         f"Für {today_display} existiert ein Eintrag vom Typ "
+                         f"'{non_arbeit.get('Typ')}'. Bitte überprüfen.")
+        _log_quick_action('start', 'error', f"entry conflict type={non_arbeit.get('Typ')}")
         return
 
-    # no entry -> create one
-    data.append({'Datum': today_internal, 'Typ': 'Arbeit', 'Startzeit': now_str, 'Endzeit': '', 'Dauer': '', 'Kommentar': ''})
+    today_arbeit = [e for e in get_entries_by_date(data, today_internal)
+                    if e.get('Typ') == 'Arbeit']
+
+    if today_arbeit:
+        last = today_arbeit[-1]
+        if last.get('Startzeit') and not last.get('Endzeit'):
+            # Open shift — must check out first
+            _show_messagebox('Bereits eingecheckt',
+                             f"Sie sind bereits am {today_display} um {last['Startzeit']} "
+                             f"eingecheckt.\nBitte buchen Sie zuerst 'Gehen', bevor Sie "
+                             f"erneut 'Kommen' buchen.")
+            _log_quick_action('start', 'skipped',
+                              f"already checked in {last.get('Startzeit')}")
+            return
+        # Last shift is complete → allow another check-in
+
+    # Create a new Arbeit entry
+    data.append({'Datum': today_internal, 'Typ': 'Arbeit',
+                 'Startzeit': now_str, 'Endzeit': '', 'Dauer': '', 'Kommentar': ''})
     save_data(data)
-    _log_quick_action('start', 'ok', f"start {now_str}")
-    _show_messagebox('Eingecheckt', f"Eingecheckt: {today_display} um {now_str}.")
+    shift_num = len([e for e in data
+                     if e.get('Datum') == today_internal and e.get('Typ') == 'Arbeit'])
+    _log_quick_action('start', 'ok', f"start {now_str} shift={shift_num}")
+    if shift_num > 1:
+        _show_messagebox('Eingecheckt',
+                         f"Eingecheckt (Schicht {shift_num}): {today_display} um {now_str}.")
+    else:
+        _show_messagebox('Eingecheckt', f"Eingecheckt: {today_display} um {now_str}.")
 
 
 def quick_end_action():
     data = load_data()
     _log_quick_action('end', 'begin', '')
     today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
-    today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
-    now_str = datetime.now().strftime(TIME_FORMAT)
-    today_entry = get_entry_by_date(data, today_internal)
+    today_display  = datetime.now().strftime(DATE_FORMAT_DISPLAY)
+    now_str        = datetime.now().strftime(TIME_FORMAT)
 
-    if not today_entry or today_entry.get('Typ') != 'Arbeit' or not today_entry.get('Startzeit'):
-        # undefined state: no start recorded for today
-        last_date, last_time = _get_last_checkout_time(data)
-        if last_time:
-            _show_messagebox('Kein Arbeitsbeginn gefunden', f"Kein Arbeitsbeginn für heute gefunden. Letzter Checkout: {last_date} um {last_time}. Aktion abgebrochen.")
-            _log_quick_action('end', 'error', f"no start found, last {last_date} {last_time}")
+    today_arbeit = [e for e in get_entries_by_date(data, today_internal)
+                    if e.get('Typ') == 'Arbeit']
+
+    # Find the last open shift (has Startzeit, no Endzeit)
+    open_entry = next(
+        (e for e in reversed(today_arbeit) if e.get('Startzeit') and not e.get('Endzeit')),
+        None
+    )
+
+    if not open_entry:
+        if today_arbeit:
+            last = today_arbeit[-1]
+            _show_messagebox('Bereits ausgecheckt',
+                             f"Alle Schichten für heute sind abgeschlossen.\n"
+                             f"Letzte Schicht: {last.get('Startzeit','?')} – "
+                             f"{last.get('Endzeit','?')}.")
+            _log_quick_action('end', 'skipped', 'all shifts closed')
         else:
-            _show_messagebox('Kein Arbeitsbeginn gefunden', "Kein Arbeitsbeginn für heute gefunden. Aktion abgebrochen.")
-            _log_quick_action('end', 'error', "no start found")
+            last_date, last_time = _get_last_checkout_time(data)
+            if last_time:
+                _show_messagebox('Kein Arbeitsbeginn gefunden',
+                                 f"Kein Arbeitsbeginn für heute gefunden.\n"
+                                 f"Letzter Checkout: {last_date} um {last_time}. "
+                                 f"Aktion abgebrochen.")
+                _log_quick_action('end', 'error', f"no start found, last {last_date} {last_time}")
+            else:
+                _show_messagebox('Kein Arbeitsbeginn gefunden',
+                                 "Kein Arbeitsbeginn für heute gefunden. Aktion abgebrochen.")
+                _log_quick_action('end', 'error', 'no start found')
         return
 
-    if today_entry.get('Endzeit'):
-        _show_messagebox('Bereits ausgecheckt', f"Sie haben bereits um {today_entry['Endzeit']} ausgecheckt.")
-        _log_quick_action('end', 'skipped', f"already ended {today_entry.get('Endzeit')}")
-        return
-
-    today_entry['Endzeit'] = now_str
-    today_entry['Dauer'] = calculate_duration(today_entry.get('Startzeit', ''), today_entry.get('Endzeit', ''))
+    open_entry['Endzeit'] = now_str
+    open_entry['Dauer']   = calculate_duration(open_entry.get('Startzeit', ''), now_str)
     save_data(data)
-    _log_quick_action('end', 'ok', f"end {now_str} dur={today_entry.get('Dauer','')}")
-    _show_messagebox('Ausgecheckt', f"Ausgecheckt: {today_display} um {now_str}. Gearbeitet: {today_entry['Dauer']} Stunden.")
+    shift_num = today_arbeit.index(open_entry) + 1
+    _log_quick_action('end', 'ok',
+                      f"end {now_str} dur={open_entry.get('Dauer','')} shift={shift_num}")
+    if len(today_arbeit) > 1:
+        _show_messagebox('Ausgecheckt',
+                         f"Ausgecheckt (Schicht {shift_num}): {today_display} um {now_str}. "
+                         f"Gearbeitet: {open_entry['Dauer']} Stunden.")
+    else:
+        _show_messagebox('Ausgecheckt',
+                         f"Ausgecheckt: {today_display} um {now_str}. "
+                         f"Gearbeitet: {open_entry['Dauer']} Stunden.")
 
 
 def input_time(prompt: str, default: Optional[str] = None) -> str:
@@ -659,6 +696,11 @@ def get_entry_by_date(data, target_date_internal):
         if entry['Datum'] == target_date_internal:
             return entry
     return None
+
+
+def get_entries_by_date(data, target_date_internal):
+    """Return all entries whose Datum matches target_date_internal."""
+    return [e for e in data if e.get('Datum') == target_date_internal]
 
 
 def _log_quick_action(action: str, status: str, msg: str = ''):
@@ -1286,6 +1328,7 @@ def generate_pdf_report():
         'Feiertag':      colors.HexColor('#E6F2FF'),
         'Zeitausgleich': colors.HexColor('#FFFFE6'),
         'Header':        colors.HexColor('#CCCCCC'),
+        'MultiCheckin':  colors.HexColor('#5BA8D4'),  # distinct teal-blue for multi-checkin days
     }
     delta_pos_color = colors.HexColor('#006600')
     delta_neg_color = colors.HexColor('#CC0000')
@@ -1463,7 +1506,9 @@ def generate_pdf_report():
         # helper to lighten a HexColor by blending with white
         def _lighten_color(hexcol, amount):
             try:
-                r, g, b = int(hexcol.hexval[1:3], 16), int(hexcol.hexval[3:5], 16), int(hexcol.hexval[5:7], 16)
+                r = int(hexcol.red * 255)
+                g = int(hexcol.green * 255)
+                b = int(hexcol.blue * 255)
             except Exception:
                 return hexcol
             r = int(r + (255 - r) * amount)
@@ -1501,13 +1546,17 @@ def generate_pdf_report():
             row_index    = len(table_data) - 1
             day_type_key = entry.get('Typ', 'Arbeit')
 
-            # Determine background color. If the date has multiple intervals, derive
-            # a family of shades: the first interval keeps the base type color, later
-            # intervals get progressively lighter shades.
-            if day_type_key in type_colors:
-                base_col = type_colors[day_type_key]
+            # Determine background color.
+            # Days with multiple Arbeit intervals get a distinct teal-blue family:
+            #   first entry  → full saturation base color
+            #   later entries → progressively lighter shades of the same hue
+            if multiple_intervals and day_type_key == 'Arbeit':
+                base_col = type_colors['MultiCheckin']
+            else:
+                base_col = type_colors.get(day_type_key)
+            if base_col is not None:
                 if multiple_intervals:
-                    shade_amount = min(0.0 + 0.20 * (occ_index if occ_index > 0 else 0), 0.65)
+                    shade_amount = min(0.30 * occ_index, 0.65)
                     bg_col = _lighten_color(base_col, shade_amount)
                 else:
                     bg_col = base_col

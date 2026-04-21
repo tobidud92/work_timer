@@ -102,6 +102,16 @@ Using `WindowStyle=7` (SW_SHOWMINNOACTIVE) instead of a hidden VBS wrapper ensur
 
 ---
 
+## Corrections (Korrekturen)
+
+The main menu exposes direct options to correct start and end times:
+- `Arbeitsbeginn korrigieren` — corrects or backdates a start time for any date.
+- `Arbeitsende korrigieren` — corrects or backdates an end time for any date.
+
+Correction prompts accept dates in `TT.MM.JJJJ` format. If the user leaves the date input empty, the current date is used as default.
+
+---
+
 ## Holiday handling
 
 - `get_public_holidays(start_year, years)` — computes Bavarian public holidays using an Easter algorithm + fixed-date holidays.
