@@ -2061,6 +2061,174 @@ def main_menu():
     return True
 
 
+def _pick_entries_interactive(entries):
+    """Interactive scrollable checkbox list for selecting entries to delete.
+
+    Returns a list of indices (into `entries`) that the user selected,
+    or None if the user cancelled.
+
+    Uses prompt_toolkit Application when available; falls back to numbered
+    plain-text input otherwise.
+    """
+    if not entries:
+        return []
+
+    _ensure_prompt_toolkit()
+
+    if HAVE_PROMPT_TOOLKIT:
+        try:
+            from prompt_toolkit.application import Application
+            from prompt_toolkit.key_binding import KeyBindings
+            from prompt_toolkit.layout import Layout
+            from prompt_toolkit.layout.containers import Window
+            from prompt_toolkit.layout.controls import FormattedTextControl
+            from prompt_toolkit.styles import Style
+
+            selected = [False] * len(entries)
+            cursor   = [0]        # mutable so closures can write
+            result   = [None]     # None = cancelled, list = confirmed selection
+
+            def _fmt_entry(idx, entry):
+                chk  = '[x]' if selected[idx] else '[ ]'
+                typ  = entry.get('Typ', '?')
+                st   = entry.get('Startzeit', '') or '—'
+                et   = entry.get('Endzeit', '')   or '—'
+                dur  = entry.get('Dauer', '')      or '—'
+                kom  = entry.get('Kommentar', '')
+                line = f"  {chk} {typ:14s}  {st} – {et}  ({dur} h)"
+                if kom:
+                    line += f"  [{kom[:30]}]"
+                return line
+
+            def get_text():
+                lines = []
+                lines.append(('class:header',
+                               ' Einträge auswählen zum Löschen\n'
+                               ' ↑/↓ navigieren · Leertaste auswählen · Enter bestätigen · Esc abbrechen\n\n'))
+                for i, e in enumerate(entries):
+                    txt = _fmt_entry(i, e)
+                    if i == cursor[0]:
+                        lines.append(('class:cursor', '▶' + txt[1:] + '\n'))
+                    else:
+                        if selected[i]:
+                            lines.append(('class:selected', txt + '\n'))
+                        else:
+                            lines.append(('', txt + '\n'))
+                return lines
+
+            kb = KeyBindings()
+
+            @kb.add('up')
+            def _up(event):
+                cursor[0] = max(0, cursor[0] - 1)
+
+            @kb.add('down')
+            def _down(event):
+                cursor[0] = min(len(entries) - 1, cursor[0] + 1)
+
+            @kb.add('space')
+            def _toggle(event):
+                selected[cursor[0]] = not selected[cursor[0]]
+
+            @kb.add('enter')
+            def _confirm(event):
+                result[0] = [i for i, s in enumerate(selected) if s]
+                event.app.exit()
+
+            @kb.add('escape')
+            @kb.add('c-c')
+            @kb.add('q')
+            def _cancel(event):
+                result[0] = None
+                event.app.exit()
+
+            style = Style.from_dict({
+                'header':   'bold',
+                'cursor':   'bold underline',
+                'selected': 'fg:ansicyan',
+            })
+
+            app = Application(
+                layout=Layout(Window(FormattedTextControl(get_text, focusable=True))),
+                key_bindings=kb,
+                style=style,
+                full_screen=False,
+                mouse_support=False,
+            )
+            app.run()
+            return result[0]
+
+        except Exception:
+            pass  # fall through to plain-text picker
+
+    # ── Plain-text fallback ────────────────────────────────────────────────
+    print()
+    for i, e in enumerate(entries, 1):
+        typ = e.get('Typ', '?')
+        st  = e.get('Startzeit', '') or '—'
+        et  = e.get('Endzeit', '')   or '—'
+        dur = e.get('Dauer', '')     or '—'
+        kom = e.get('Kommentar', '')
+        line = f"  {i}. {typ:14s}  {st} – {et}  ({dur} h)"
+        if kom:
+            line += f"  [{kom[:30]}]"
+        print(line)
+    print()
+    raw = input('Nummern der zu löschenden Einträge (kommagetrennt, leer = Abbrechen): ').strip()
+    if not raw:
+        return None
+    selected_indices = []
+    for part in raw.split(','):
+        try:
+            idx = int(part.strip()) - 1
+            if 0 <= idx < len(entries):
+                selected_indices.append(idx)
+        except ValueError:
+            pass
+    return selected_indices if selected_indices else None
+
+
+def delete_entry():
+    """Interaktiv einen oder mehrere Einträge eines Tages löschen."""
+    date_internal = input_date('Datum des zu löschenden Eintrags')
+    date_display  = to_display(date_internal)
+
+    data    = load_data()
+    entries = get_entries_by_date(data, date_internal)
+
+    if not entries:
+        print(f'Keine Einträge für {date_display} gefunden.')
+        return
+
+    print(f'\nEinträge für {date_display}:')
+    chosen = _pick_entries_interactive(entries)
+
+    if chosen is None:
+        print('Abgebrochen.')
+        return
+    if not chosen:
+        print('Keine Einträge ausgewählt.')
+        return
+
+    to_delete = [entries[i] for i in sorted(set(chosen))]
+
+    print(f'\nFolgende {len(to_delete)} Eintrag/Einträge werden gelöscht:')
+    for e in to_delete:
+        typ = e.get('Typ', '?')
+        st  = e.get('Startzeit', '') or '—'
+        et  = e.get('Endzeit', '')   or '—'
+        print(f'  {typ}  {st} – {et}')
+
+    if not ask_yes('\nWirklich löschen? (j/n): '):
+        print('Abgebrochen.')
+        return
+
+    delete_set = {id(e) for e in to_delete}
+    new_data   = [e for e in data if id(e) not in delete_set]
+    save_data(new_data)
+    print(f'{len(to_delete)} Eintrag/Einträge für {date_display} gelöscht.')
+
+
 def settings_menu():
     print("\n--- Einstellungen / Optionen ---")
     print("1. Urlaubstag eintragen")
@@ -2072,10 +2240,11 @@ def settings_menu():
     print("7. Feiertage aus CSV importieren")
     print("8. Config-Backup wiederherstellen")
     print("9. Name ändern")
-    print("0. Zurück")
     print("10. Feiertage exportieren (CSV)")
+    print("11. Eintrag löschen")
+    print("0. Zurück")
 
-    choice = input('Wähle eine Option (0-10): ')
+    choice = input('Wähle eine Option (0-11): ')
     if choice == '1':
         add_special_day('Urlaub')
     elif choice == '2':
@@ -2103,6 +2272,8 @@ def settings_menu():
         restore_config_backup()
     elif choice == '9':
         set_user_name()
+    elif choice == '11':
+        delete_entry()
     elif choice == '0':
         return
     else:
