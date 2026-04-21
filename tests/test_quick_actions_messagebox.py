@@ -14,13 +14,23 @@ class TestQuickActionsMessageBox(unittest.TestCase):
             temp = list(d)
             self.data_store.clear()
             self.data_store.extend(temp)
+        def fake_append(entry):
+            # simulate _append_data_row: just add to the in-memory store
+            self.data_store.append(entry)
 
-        # patch load/save and messagebox
+        # patch load/save/append, state helpers, and messagebox
         wt.load_data_orig = wt.load_data
         wt.save_data_orig = wt.save_data
+        wt._append_data_row_orig = wt._append_data_row
+        wt._load_checkin_state_orig = wt._load_checkin_state
+        wt._save_checkin_state_orig = wt._save_checkin_state
         wt._show_messagebox_orig = getattr(wt, '_show_messagebox', None)
         wt.load_data = fake_load
         wt.save_data = fake_save
+        wt._append_data_row = fake_append
+        # derive state dynamically from data_store so the fast-path reflects real data
+        wt._load_checkin_state = lambda: wt._derive_checkin_state(self.data_store)
+        wt._save_checkin_state = lambda s: None  # no-op
 
         self.msg_calls = []
         def fake_msg(title, message):
@@ -31,6 +41,9 @@ class TestQuickActionsMessageBox(unittest.TestCase):
         # restore
         wt.load_data = wt.load_data_orig
         wt.save_data = wt.save_data_orig
+        wt._append_data_row = wt._append_data_row_orig
+        wt._load_checkin_state = wt._load_checkin_state_orig
+        wt._save_checkin_state = wt._save_checkin_state_orig
         if wt._show_messagebox_orig is None:
             try:
                 delattr(wt, '_show_messagebox')

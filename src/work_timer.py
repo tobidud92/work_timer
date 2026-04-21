@@ -55,6 +55,8 @@ BREAK_DURATION_HOURS  = 0.75             # 45 min
 MAX_NAME_LEN         = 100
 MAX_COMMENT_LEN      = 500
 CSV_INJECTION_PREFIX_CHARS = ('=', '+', '-', '@')
+# Tiny sidecar that stores the current open shift so quick actions can skip loading the full CSV
+CHECKIN_STATE_FILE = 'checkin_state.json'
 
 # --- Konfigurationsverwaltung ---
 
@@ -385,12 +387,123 @@ def _get_last_checkout_time(data):
     return (None, None)
 
 
+# ---------------------------------------------------------------------------
+# Checkin-state sidecar  (keeps quick actions fast — avoids loading the CSV)
+# ---------------------------------------------------------------------------
+
+def _load_checkin_state() -> dict:
+    """Read the tiny checkin_state.json sidecar.  Returns {} on any error."""
+    try:
+        with open(CHECKIN_STATE_FILE, 'r', encoding='utf-8') as f:
+            s = json.load(f)
+        return s if isinstance(s, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_checkin_state(state: dict) -> None:
+    """Atomically write checkin_state.json."""
+    tmp = CHECKIN_STATE_FILE + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(state, f, ensure_ascii=False)
+        os.replace(tmp, CHECKIN_STATE_FILE)
+    except Exception:
+        pass
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+
+
+def _derive_checkin_state(data: list) -> dict:
+    """Derive fresh state from a data list after any save."""
+    today = datetime.now().strftime(DATE_FORMAT_INTERNAL)
+    today_arbeit = [e for e in data
+                    if e.get('Datum') == today and e.get('Typ') == 'Arbeit']
+    open_shift = next(
+        (e for e in reversed(today_arbeit) if e.get('Startzeit') and not e.get('Endzeit')),
+        None
+    )
+    state: dict = {'version': 1}
+    if open_shift:
+        state['open_shift'] = {
+            'date': today,
+            'start': open_shift['Startzeit'],
+            'shift_num': today_arbeit.index(open_shift) + 1,
+        }
+    # Last completed Endzeit today (for 'already checked out' message)
+    last_closed = next((e for e in reversed(today_arbeit) if e.get('Endzeit')), None)
+    if last_closed:
+        state['last_checkout'] = {'date': today,
+                                  'start': last_closed.get('Startzeit', ''),
+                                  'time': last_closed['Endzeit']}
+    else:
+        # Fall back to last Endzeit across all data
+        last_any = next((e for e in reversed(data) if e.get('Endzeit')), None)
+        if last_any:
+            state['last_checkout'] = {'date': last_any['Datum'],
+                                      'start': last_any.get('Startzeit', ''),
+                                      'time': last_any['Endzeit']}
+    return state
+
+
+def _append_data_row(entry: dict) -> None:
+    """Append a single new row to the CSV without reading or rewriting the whole file.
+
+    Creates the file with a header if it does not yet exist.  After appending,
+    the in-memory data cache is invalidated so the next load_data() call picks
+    up the change.
+    """
+    global _data_cache, _data_cache_mtime, _data_index
+    fieldnames = ['Datum', 'Typ', 'Startzeit', 'Endzeit', 'Dauer', 'Kommentar']
+    safe_row = {
+        'Datum':      sanitize_for_csv(entry.get('Datum', '')),
+        'Typ':        sanitize_for_csv(entry.get('Typ', '')),
+        'Startzeit':  sanitize_for_csv(entry.get('Startzeit', '')),
+        'Endzeit':    sanitize_for_csv(entry.get('Endzeit', '')),
+        'Dauer':      sanitize_for_csv(entry.get('Dauer', '')),
+        'Kommentar':  sanitize_for_csv(entry.get('Kommentar', ''), max_len=MAX_COMMENT_LEN),
+    }
+    needs_header = not os.path.exists(CSV_FILE) or os.path.getsize(CSV_FILE) == 0
+    with open(CSV_FILE, mode='a', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if needs_header:
+            writer.writeheader()
+        writer.writerow(safe_row)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except Exception:
+            pass
+    # Invalidate the data cache so the next interactive load_data() re-reads from disk
+    _data_cache = None
+    _data_cache_mtime = -1.0
+    _data_index = {}
+
+
 def quick_start_action():
-    data = load_data()
     _log_quick_action('start', 'begin', '')
     today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
     today_display  = datetime.now().strftime(DATE_FORMAT_DISPLAY)
     now_str        = datetime.now().strftime(TIME_FORMAT)
+
+    # ── Fast path: consult sidecar only (no CSV I/O) ──────────────────────────
+    state = _load_checkin_state()
+    open_shift = state.get('open_shift')
+    if open_shift and open_shift.get('date') == today_internal:
+        _show_messagebox('Bereits eingecheckt',
+                         f"Sie sind bereits am {today_display} um {open_shift['start']} "
+                         f"eingecheckt.\nBitte buchen Sie zuerst 'Gehen', bevor Sie "
+                         f"erneut 'Kommen' buchen.")
+        _log_quick_action('start', 'skipped',
+                          f"state fast-path: already checked in {open_shift['start']}")
+        return
+
+    # ── Slow path: load CSV for conflict/multi-shift checks ───────────────────
+    data = load_data()
 
     # Check for a non-Arbeit entry that would block check-in
     non_arbeit = next((e for e in get_entries_by_date(data, today_internal)
@@ -408,22 +521,27 @@ def quick_start_action():
     if today_arbeit:
         last = today_arbeit[-1]
         if last.get('Startzeit') and not last.get('Endzeit'):
-            # Open shift — must check out first
+            # State was stale — block and refresh state
             _show_messagebox('Bereits eingecheckt',
                              f"Sie sind bereits am {today_display} um {last['Startzeit']} "
                              f"eingecheckt.\nBitte buchen Sie zuerst 'Gehen', bevor Sie "
                              f"erneut 'Kommen' buchen.")
             _log_quick_action('start', 'skipped',
                               f"already checked in {last.get('Startzeit')}")
+            _save_checkin_state(_derive_checkin_state(data))  # refresh stale state
             return
         # Last shift is complete → allow another check-in
 
-    # Create a new Arbeit entry
-    data.append({'Datum': today_internal, 'Typ': 'Arbeit',
-                 'Startzeit': now_str, 'Endzeit': '', 'Dauer': '', 'Kommentar': ''})
-    save_data(data)
-    shift_num = len([e for e in data
-                     if e.get('Datum') == today_internal and e.get('Typ') == 'Arbeit'])
+    # ── Write: append a single row rather than rewriting the whole CSV ─────────
+    new_entry = {'Datum': today_internal, 'Typ': 'Arbeit',
+                 'Startzeit': now_str, 'Endzeit': '', 'Dauer': '', 'Kommentar': ''}
+    _append_data_row(new_entry)
+    shift_num = len(today_arbeit) + 1
+    # Write fresh state immediately so the next quick action sees it
+    _save_checkin_state({'version': 1,
+                         'open_shift': {'date': today_internal,
+                                        'start': now_str,
+                                        'shift_num': shift_num}})
     _log_quick_action('start', 'ok', f"start {now_str} shift={shift_num}")
     if shift_num > 1:
         _show_messagebox('Eingecheckt',
@@ -433,12 +551,38 @@ def quick_start_action():
 
 
 def quick_end_action():
-    data = load_data()
     _log_quick_action('end', 'begin', '')
     today_internal = datetime.now().strftime(DATE_FORMAT_INTERNAL)
     today_display  = datetime.now().strftime(DATE_FORMAT_DISPLAY)
     now_str        = datetime.now().strftime(TIME_FORMAT)
 
+    # ── Fast path: consult sidecar only (no CSV I/O) ──────────────────────────
+    state = _load_checkin_state()
+    open_shift = state.get('open_shift')
+    if not open_shift or open_shift.get('date') != today_internal:
+        # No open shift according to the sidecar
+        last_co = state.get('last_checkout', {})
+        if last_co.get('date') == today_internal:
+            _show_messagebox('Bereits ausgecheckt',
+                             f"Alle Schichten für heute sind abgeschlossen.\n"
+                             f"Letzte Schicht: {last_co.get('start','?')} – "
+                             f"{last_co.get('time','?')}.")
+            _log_quick_action('end', 'skipped', 'state fast-path: all shifts closed')
+        elif last_co.get('date') and last_co.get('time'):
+            _show_messagebox('Kein Arbeitsbeginn gefunden',
+                             f"Kein Arbeitsbeginn für heute gefunden.\n"
+                             f"Letzter Checkout: {to_display(last_co['date'])} um "
+                             f"{last_co['time']}. Aktion abgebrochen.")
+            _log_quick_action('end', 'error',
+                              f"state fast-path: no start, last {last_co['date']} {last_co['time']}")
+        else:
+            _show_messagebox('Kein Arbeitsbeginn gefunden',
+                             "Kein Arbeitsbeginn für heute gefunden. Aktion abgebrochen.")
+            _log_quick_action('end', 'error', 'state fast-path: no start found')
+        return
+
+    # ── Slow path: load CSV to find and patch the open entry ──────────────────
+    data = load_data()
     today_arbeit = [e for e in get_entries_by_date(data, today_internal)
                     if e.get('Typ') == 'Arbeit']
 
@@ -449,6 +593,8 @@ def quick_end_action():
     )
 
     if not open_entry:
+        # State was stale — refresh and report
+        _save_checkin_state(_derive_checkin_state(data))  # refresh stale state
         if today_arbeit:
             last = today_arbeit[-1]
             _show_messagebox('Bereits ausgecheckt',
@@ -472,7 +618,7 @@ def quick_end_action():
 
     open_entry['Endzeit'] = now_str
     open_entry['Dauer']   = calculate_duration(open_entry.get('Startzeit', ''), now_str)
-    save_data(data)
+    save_data(data)  # also refreshes checkin_state.json
     shift_num = today_arbeit.index(open_entry) + 1
     _log_quick_action('end', 'ok',
                       f"end {now_str} dur={open_entry.get('Dauer','')} shift={shift_num}")
@@ -746,6 +892,8 @@ def save_data(data):
         except Exception:
             _data_cache_mtime = -1.0
         _data_index = _build_data_index(data)
+        # Keep checkin_state.json in sync so quick actions stay fast
+        _save_checkin_state(_derive_checkin_state(data))
     finally:
         try:
             if os.path.exists(tmp):
