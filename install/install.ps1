@@ -57,8 +57,8 @@ if (-not (Test-Path $Dest)) {
     try { New-Item -ItemType Directory -Path $Dest -Force | Out-Null } catch { Write-DebugLog ("Failed to create {0}: {1}" -f $Dest, $_); throw }
 }
 
-# ── Find the onedir bundle (directory containing work_timer.exe) ───────────
-# Build output is dist/work_timer/ — search Source and common parent locations.
+# --- Find the onedir bundle (directory containing work_timer.exe) ---------
+# Build output is dist/work_timer/ - search Source and common parent locations.
 $mainExe = Get-ChildItem -Path $Source -Filter 'work_timer.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $mainExe) {
     $parent = Split-Path -Path $Source -Parent
@@ -69,7 +69,7 @@ if (-not $mainExe) { Write-Error 'work_timer.exe not found'; exit 1 }
 $binDir = Split-Path -Parent $mainExe.FullName
 Write-DebugLog "Binary directory: $binDir"
 
-# ── Copy the entire onedir bundle ─────────────────────────────────────────
+# --- Copy the entire onedir bundle ----------------------------------------
 # Use robocopy for reliability; fall back to Copy-Item on unexpected failures.
 $robocopyArgs = @($binDir, $Dest, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
 $rc = & robocopy @robocopyArgs
@@ -80,7 +80,7 @@ if ($LASTEXITCODE -ge 8) {
     Copy-Item -Path (Join-Path $binDir '*') -Destination $Dest -Recurse -Force
 }
 
-# ── Copy icons (stored next to install.ps1, not inside the bundle) ────────
+# --- Copy icons (stored next to install.ps1, not inside the bundle) -------
 foreach ($ico in @('Kommen.ico', 'Gehen.ico', 'WorkTimer.ico')) {
     $found = Get-ChildItem -Path $Source -Filter $ico -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($found) { Copy-FileRetry -SrcPath $found.FullName -DestDir $Dest }
@@ -93,7 +93,7 @@ $quickExePath = Join-Path $Dest 'work_timer_quick.exe'
 # Fall back to main exe if quick exe not present (e.g. older build)
 if (-not (Test-Path $quickExePath)) { $quickExePath = $exePath }
 
-# ── Create shortcuts ──────────────────────────────────────────────────────
+# --- Create shortcuts ------------------------------------------------------
 if (-not $SkipShortcuts) {
     try {
         $w = New-Object -ComObject WScript.Shell
