@@ -109,6 +109,18 @@ if ($LASTEXITCODE -ge 8) {
     }
 }
 
+# --- Remove existing shortcuts before copying icons -----------------------
+# Explorer holds .ico files open as long as a shortcut that references them
+# exists. Removing the shortcuts first releases the lock so Copy-Item succeeds.
+$desktop = [Environment]::GetFolderPath('Desktop')
+foreach ($lnk in @('Kommen.lnk', 'Gehen.lnk', 'WorkTimer.lnk')) {
+    $lnkPath = Join-Path $desktop $lnk
+    if (Test-Path $lnkPath) {
+        Remove-Item -Path $lnkPath -Force -ErrorAction SilentlyContinue
+        Write-DebugLog "Removed existing shortcut: $lnkPath"
+    }
+}
+
 # --- Copy icons (stored next to install.ps1, not inside the bundle) -------
 foreach ($ico in @('Kommen.ico', 'Gehen.ico', 'WorkTimer.ico')) {
     $found = Get-ChildItem -Path $Source -Filter $ico -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -126,7 +138,6 @@ if (-not (Test-Path $quickExePath)) { $quickExePath = $exePath }
 if (-not $SkipShortcuts) {
     try {
         $w = New-Object -ComObject WScript.Shell
-        $desktop = [Environment]::GetFolderPath('Desktop')
 
         # Kommen: use quick exe (no console window, fast startup)
         $s = $w.CreateShortcut((Join-Path $desktop 'Kommen.lnk'))
