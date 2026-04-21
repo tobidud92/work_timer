@@ -70,14 +70,26 @@ $binDir = Split-Path -Parent $mainExe.FullName
 Write-DebugLog "Binary directory: $binDir"
 
 # --- Copy the entire onedir bundle ----------------------------------------
+# /IS + /IT  : always overwrite existing files (same size, tweaked timestamps)
+# /XF        : never touch the CSV database (preserve user data)
 # Use robocopy for reliability; fall back to Copy-Item on unexpected failures.
-$robocopyArgs = @($binDir, $Dest, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
-$rc = & robocopy @robocopyArgs
+$csvName = 'arbeitszeiten.csv'
+$robocopyArgs = @($binDir, $Dest, '/E', '/IS', '/IT', '/XF', $csvName, '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
+& robocopy @robocopyArgs | Out-Null
 Write-DebugLog "robocopy exit code: $LASTEXITCODE"
 if ($LASTEXITCODE -ge 8) {
     # robocopy exit codes 0-7 are success; 8+ are errors
     Write-Warning "robocopy reported errors (code $LASTEXITCODE). Falling back to Copy-Item."
-    Copy-Item -Path (Join-Path $binDir '*') -Destination $Dest -Recurse -Force
+    # Copy everything except the CSV database
+    Get-ChildItem -Path $binDir -Recurse | Where-Object {
+        -not $_.PSIsContainer -and $_.Name -ne $csvName
+    } | ForEach-Object {
+        $rel  = $_.FullName.Substring($binDir.Length).TrimStart('\','/')
+        $dest = Join-Path $Dest $rel
+        $dir  = Split-Path $dest -Parent
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        Copy-Item -Path $_.FullName -Destination $dest -Force
+    }
 }
 
 # --- Copy icons (stored next to install.ps1, not inside the bundle) -------
