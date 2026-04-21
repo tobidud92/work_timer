@@ -108,11 +108,11 @@ if ($robocopyExit -ge 8) {
         if ($_.Name -like 'holidays*.csv') { return $false }
         return $true
     } | ForEach-Object {
-        $rel  = $_.FullName.Substring($binDir.Length).TrimStart('\','/')
-        $dest = Join-Path $Dest $rel
-        $dir  = Split-Path $dest -Parent
+        $rel      = $_.FullName.Substring($binDir.Length).TrimStart('\','/')
+        $destFile = Join-Path $Dest $rel
+        $dir      = Split-Path $destFile -Parent
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        if (-not $_.PSIsContainer) { Copy-Item -Path $_.FullName -Destination $dest -Force }
+        if (-not $_.PSIsContainer) { Copy-Item -Path $_.FullName -Destination $destFile -Force }
     }
 }
 
