@@ -32,12 +32,15 @@ jobs:
         shell: pwsh
 
       - name: "Optional: Sign executable (requires secrets.PFX_BASE64 and secrets.PFX_PASSWORD)"
-        if: ${{ secrets.PFX_BASE64 != '' && secrets.PFX_PASSWORD != '' }}
+        if: env.PFX_BASE64 != '' && env.PFX_PASSWORD != ''
+        env:
+          PFX_BASE64: ${{ secrets.PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.PFX_PASSWORD }}
         run: |
           Write-Host 'Decoding PFX and attempting to sign executable(s)'
           $pfxPath = "agent_temp_cert.pfx"
-          [System.IO.File]::WriteAllBytes($pfxPath, [System.Convert]::FromBase64String("${{ secrets.PFX_BASE64 }}"))
-          $pwd = "${{ secrets.PFX_PASSWORD }}"
+          [System.IO.File]::WriteAllBytes($pfxPath, [System.Convert]::FromBase64String($env:PFX_BASE64))
+          $pwd = $env:PFX_PASSWORD
           $files = Get-ChildItem -Path WorkTimerInstall_release -Filter *.exe -File -Recurse
           foreach ($f in $files) {
               Write-Host "Signing $($f.FullName)"
