@@ -33,13 +33,8 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\\install\\generate_install_folder.ps1 -OutDir WorkTimerInstall -Force
         shell: pwsh
 
-      - name: Compress installer folder
-        run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'WorkTimerInstall\\*' -DestinationPath 'WorkTimerInstall.zip' -Force"
-        shell: pwsh
-
-      - name: Upload installer artifact (ZIP only)
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: WorkTimerInstall
-          path: WorkTimerInstall.zip
+          path: WorkTimerInstall/
