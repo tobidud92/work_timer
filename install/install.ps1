@@ -85,7 +85,9 @@ $robocopyArgs = @($binDir, $Dest, '/E', '/IS', '/IT') +
                 @('/XF') + $protectedFiles +
                 @('/XD') + $protectedDirs +
                 @('/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
-& robocopy @robocopyArgs | Out-Null
+# *> $null redirects all streams natively, avoiding the pipeline deadlock that
+# "| Out-Null" causes when robocopy emits large output during reinstalls.
+& robocopy @robocopyArgs *> $null
 Write-DebugLog "robocopy exit code: $LASTEXITCODE"
 if ($LASTEXITCODE -ge 8) {
     # robocopy exit codes 0-7 are success; 8+ are errors
