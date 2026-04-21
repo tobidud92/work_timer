@@ -30,3 +30,18 @@ temp/
 # Generated installer folder
 WorkTimerInstall/
 WorkTimerInstall_test/
+
+# Pester temp test folders
+pester_install_test*/
+pester_runinstall_test*/
+
+# Backup files
+*.bak
+
+# Binaries in repo root (built artifacts belong in dist/)
+work_timer.exe
+*.exe
+
+# User data files in root (copies placed there during testing)
+/arbeitszeiten.csv
+/config.json

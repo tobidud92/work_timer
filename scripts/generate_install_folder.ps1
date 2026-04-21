@@ -12,8 +12,8 @@ if (Test-Path $out) {
 }
 New-Item -Path $out -ItemType Directory | Out-Null
 
-# Choose install.bat from several possible locations
-$installCandidates = @("code/install.bat","code/WorkTimerInstall/install.bat","install.bat")
+# Choose installer script from several possible locations
+$installCandidates = @("code/install.ps1", "code/WorkTimerInstall/install.ps1", "code/install.bat")
 $install = $null
 foreach ($c in $installCandidates) {
     $p = Join-Path $root $c
@@ -29,8 +29,8 @@ foreach ($pattern in $exePatterns) {
     if ($matches) { foreach ($m in $matches) { Copy-Item $m.FullName $out -Force } ; break }
 }
 
-# Copy .ico files from likely locations
-$icoPatterns = @("code/WorkTimerInstall/*.ico","code/*.ico","data/*.ico")
+# Copy .ico files — canonical source is data/
+$icoPatterns = @("code/WorkTimerInstall/*.ico", "data/*.ico")
 foreach ($pattern in $icoPatterns) {
     $fullPattern = Join-Path $root $pattern
     $matches = Get-ChildItem -Path $fullPattern -File -ErrorAction SilentlyContinue
