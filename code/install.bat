@@ -30,28 +30,63 @@ if not exist "%DEST%" (
 )
 
 echo Checking required files in the installer folder...
+:: If files are not directly in %SRC%, try parent or nested subfolders (common when extracting zips)
 if not exist "%SRC%\work_timer.exe" (
     if not exist "%SRC%\dist\work_timer.exe" (
-        echo ERROR: work_timer.exe not found in %SRC% or %SRC%\dist\
-        pause
-        exit /b 1
+        rem check parent directory (one level up)
+        if exist "%SRC%\..\work_timer.exe" (
+            set "SRC=%SRC%\.."
+        ) else if exist "%SRC%\..\dist\work_timer.exe" (
+            set "SRC=%SRC%\.."
+        ) else (
+            rem search first-level subdirectories and second-level for the expected files
+            for /d %%S in ("%SRC%\*") do (
+                if exist "%%S\work_timer.exe" (
+                    set "SRC=%%S"
+                    goto :SRC_FOUND
+                )
+                if exist "%%S\dist\work_timer.exe" (
+                    set "SRC=%%S"
+                    goto :SRC_FOUND
+                )
+                for /d %%T in ("%%S\*") do (
+                    if exist "%%T\work_timer.exe" (
+                        set "SRC=%%T"
+                        goto :SRC_FOUND
+                    )
+                    if exist "%%T\dist\work_timer.exe" (
+                        set "SRC=%%T"
+                        goto :SRC_FOUND
+                    )
+                )
+            )
+            echo ERROR: work_timer.exe not found in %SRC% or nearby subfolders
+            pause
+            exit /b 1
+        )
     )
 )
+:SRC_FOUND
 if not exist "%SRC%\Kommen.ico" (
-    echo ERROR: Kommen.ico not found in %SRC%
-    pause
-    exit /b 1
+    rem try to find icons in nearby folders
+    for /d %%I in ("%SRC%\*") do (
+        if exist "%%I\Kommen.ico" set "SRC=%%I" & goto :ICONS_FOUND
+    )
+    if exist "%SRC%\..\Kommen.ico" set "SRC=%SRC%\.."
 )
 if not exist "%SRC%\Gehen.ico" (
-    echo ERROR: Gehen.ico not found in %SRC%
-    pause
-    exit /b 1
+    for /d %%I in ("%SRC%\*") do (
+        if exist "%%I\Gehen.ico" set "SRC=%%I" & goto :ICONS_FOUND
+    )
+    if exist "%SRC%\..\Gehen.ico" set "SRC=%SRC%\.."
 )
 if not exist "%SRC%\WorkTimer.ico" (
-    echo ERROR: WorkTimer.ico not found in %SRC%
-    pause
-    exit /b 1
+    for /d %%I in ("%SRC%\*") do (
+        if exist "%%I\WorkTimer.ico" set "SRC=%%I" & goto :ICONS_FOUND
+    )
+    if exist "%SRC%\..\WorkTimer.ico" set "SRC=%SRC%\.."
 )
+:ICONS_FOUND
 
 echo Copying files...
 rem Prefer built exe in a 'dist' subfolder if present (PyInstaller output)
