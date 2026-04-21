@@ -38,7 +38,7 @@ jobs:
           #   work_timer.exe        - full interactive app
           #   work_timer_quick.exe  - slim Kommen/Gehen (fast, windowless)
           #   _internal/            - shared DLLs and .pyd files
-          pyinstaller install/work_timer.spec --distpath dist --workpath build --clean
+          pyinstaller install/work_timer.spec --distpath dist --workpath build --clean -y
         shell: pwsh
 
       - name: Verify build outputs
