@@ -23,15 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if (Test-Path requirements.txt) {
-            python -m pip install -r requirements.txt
-          } elseif (Test-Path code\requirements.txt) {
-            python -m pip install -r code\requirements.txt
-          } else {
-            Write-Host 'No requirements.txt found at root or code/, installing minimal deps'
-            python -m pip install reportlab
-          }
-          # Ensure test runner and common optional deps are available
+          python -m pip install -r requirements.txt
           python -m pip install pytest reportlab prompt_toolkit
         shell: pwsh
 
@@ -40,7 +32,7 @@ jobs:
         shell: pwsh
 
       - name: Generate installer folder
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\generate_install_folder.ps1 -OutDir WorkTimerInstall -Force
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\\install\\generate_install_folder.ps1 -OutDir WorkTimerInstall -Force
         shell: pwsh
 
       - name: Compress installer folder

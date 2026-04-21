@@ -41,13 +41,13 @@ Packaging notes regarding prompt_toolkit
 
 - Build the exe from a virtualenv where `prompt_toolkit` is installed so PyInstaller
   can detect and include its submodules. We also include a PyInstaller hook in
-  `code/pyinstaller-hooks/hook-prompt_toolkit.py` to help collect required submodules.
+  `install/pyinstaller-hooks/hook-prompt_toolkit.py` to help collect required submodules.
 - Example build command:
 
 ```powershell
 & .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-pyinstaller --onefile --console --additional-hooks-dir=code\pyinstaller-hooks code\work_timer.py
+pyinstaller install\work_timer.spec
 ```
 
 Runtime feature flags
@@ -77,7 +77,7 @@ Packaging and interactive prompt notes
 ```powershell
 & .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-pyinstaller --onefile --console --additional-hooks-dir=code\pyinstaller-hooks code\work_timer.py
+pyinstaller install\work_timer.spec
 ```
 
 - Debugging: set environment variables before running the exe to force

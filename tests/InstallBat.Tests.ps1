@@ -23,7 +23,7 @@ Describe 'install.ps1 (real installer)' {
     }
 
     It 'copies exe and icons to Dest when -Source and -Dest are provided' {
-        $installer = Join-Path $script:repoRoot 'code\install.ps1'
+        $installer = Join-Path $script:repoRoot 'install\install.ps1'
 
         # Run the real installer synchronously; -SkipShortcuts avoids touching the desktop
         & $installer -Source $script:source -Dest $script:dest -SkipShortcuts
@@ -36,7 +36,7 @@ Describe 'install.ps1 (real installer)' {
     }
 
     It 'creates kommen.bat and gehen.bat wrapper scripts in Dest' {
-        $installer = Join-Path $script:repoRoot 'code\install.ps1'
+        $installer = Join-Path $script:repoRoot 'install\install.ps1'
         & $installer -Source $script:source -Dest $script:dest -SkipShortcuts
 
         Test-Path (Join-Path $script:dest 'kommen.bat') | Should Be $true
@@ -44,7 +44,7 @@ Describe 'install.ps1 (real installer)' {
     }
 
     It 'creates kommen.vbs and gehen.vbs wrapper scripts in Dest' {
-        $installer = Join-Path $script:repoRoot 'code\install.ps1'
+        $installer = Join-Path $script:repoRoot 'install\install.ps1'
         & $installer -Source $script:source -Dest $script:dest -SkipShortcuts
 
         Test-Path (Join-Path $script:dest 'kommen.vbs') | Should Be $true
@@ -52,7 +52,7 @@ Describe 'install.ps1 (real installer)' {
     }
 
     It 'bat wrappers reference the installed exe path' {
-        $installer = Join-Path $script:repoRoot 'code\install.ps1'
+        $installer = Join-Path $script:repoRoot 'install\install.ps1'
         & $installer -Source $script:source -Dest $script:dest -SkipShortcuts
 
         $exeRef = Join-Path $script:dest 'work_timer.exe'

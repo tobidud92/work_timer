@@ -30,8 +30,9 @@ temp/
 # Generated installer folder
 WorkTimerInstall/
 WorkTimerInstall_test/
+"WorkTimerInstall (1)"/
 
-# Pester temp test folders
+# Pester temp test folders (created and removed by tests automatically)
 pester_install_test*/
 pester_runinstall_test*/
 

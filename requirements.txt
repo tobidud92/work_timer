@@ -1,0 +1,2 @@
+reportlab>=3.6
+prompt_toolkit>=3.0

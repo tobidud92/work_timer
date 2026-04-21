@@ -19,12 +19,12 @@ Installation
 ```powershell
 python -m venv .venv
 & .venv\Scripts\Activate.ps1
-pip install -r code\requirements.txt
+pip install -r requirements.txt
 ```
 
 Hinweis zur interaktiven Datumsauswahl
 
-- Für die interaktive Datumsauswahl (Up/Down zum Wechseln des Datums) wird `prompt_toolkit` benötigt. `code\requirements.txt` listet `prompt_toolkit>=3.0`.
+- Für die interaktive Datumsauswahl (Up/Down zum Wechseln des Datums) wird `prompt_toolkit` benötigt. `requirements.txt` listet `prompt_toolkit>=3.0`.
 - Wenn du eine Windows-Exe mit PyInstaller baust, installiere vorher die Anforderungen in der Build-Umgebung, damit PyInstaller `prompt_toolkit` analysieren und in die Executable einbinden kann.
 
 Start
@@ -33,7 +33,7 @@ Start
 
 ```powershell
 & .venv\Scripts\Activate.ps1
-python code\work_timer.py
+python src\work_timer.py
 ```
 
 Hauptmenü (Kurzüberblick)
@@ -68,12 +68,17 @@ Interaktive Datums- und Zeiteingabe
 
 Quick‑Shortcuts (Desktop)
 
-- `code\install.bat` ist der einfache Installer: es kopiert die benötigten Dateien nach `%USERPROFILE%\Documents\Arbeitszeit`, legt kleine wrapper-`.bat`-Dateien an (`kommen.bat` / `gehen.bat`) die die exe mit `--start-now` bzw. `--end-now` aufrufen, und erstellt Desktop-Shortcuts (`Kommen.lnk`, `Gehen.lnk`, `WorkTimer.lnk`) die auf diese Wrapper verweisen. Die Wrapper leiten stdout/stderr in Logdateien auf dem Desktop um (`work_timer_kommen_log.txt`, `work_timer_gehen_log.txt`).
-
-- Alternativ gibt es `code\create_shortcuts.ps1` zum gezielten Anlegen von Shortcuts (z.B. wenn du die Exe bereits an einem bestimmten Ort hast):
+- `install\install.ps1` ist der Installer: er kopiert die benötigten Dateien nach `%USERPROFILE%\Documents\Arbeitszeit`, legt wrapper-`.bat`- und `.vbs`-Dateien an (`kommen.bat` / `gehen.bat`) die die Exe mit `--start-now` bzw. `--end-now` aufrufen, und erstellt Desktop-Shortcuts (`Kommen.lnk`, `Gehen.lnk`, `WorkTimer.lnk`). Aufruf:
 
 ```powershell
-& .\create_shortcuts.ps1 -ExePath "C:\Path\To\dist\work_timer.exe"
+# Aus dem Repo-Root (erstellt Shortcuts + kopiert Dateien in Dokumente\Arbeitszeit)
+pwsh -NoProfile -ExecutionPolicy Bypass -File install\install.ps1
+```
+
+- Alternativ gibt es `install\create_shortcuts.ps1` zum gezielten Anlegen von Shortcuts (z.B. wenn du die Exe bereits an einem bestimmten Ort hast):
+
+```powershell
+& .\install\create_shortcuts.ps1 -ExePath "C:\Path\To\dist\work_timer.exe"
 ```
 
 Build / Exe erstellen
@@ -82,14 +87,11 @@ Build / Exe erstellen
 
 ```powershell
 & .venv\Scripts\Activate.ps1
-pip install -r code\requirements.txt
-cd code
-..\.venv\Scripts\python.exe -m PyInstaller -F work_timer.py
+pip install -r requirements.txt
+pyinstaller install\work_timer.spec
 ```
 
-- Wenn du eigene Hooks einbinden musst, kannst du PyInstaller mit `--additional-hooks-dir` aufrufen. Achte darauf, die Build-Umgebung so einzurichten, dass `prompt_toolkit` installiert ist, wenn du die interaktive Eingabe in der EXE erwartest.
-
-- Wenn die EXE die interaktive Maske nicht zeigt, setzte beim Start in der Umgebung `FORCE_PROMPT_TOOLKIT=1` (Hilfreich beim Debuggen in gebauten Umgebungen).
+- Wenn du eigene Hooks einbinden musst, sind diese in `install\pyinstaller-hooks\` abgelegt. PyInstaller wird mit dem Spec-File aufgerufen, das `--additional-hooks-dir` bereits enthält.
 
 Tests
 
