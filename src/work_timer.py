@@ -63,6 +63,22 @@ CSV_INJECTION_PREFIX_CHARS = ('=', '+', '-', '@')
 _config_cache: Optional[dict] = None
 _config_cache_mtime: float = -1.0
 
+# CSV data cache: avoids re-reading the file for every menu action.
+# _data_index maps date string -> list[entry] for O(1) lookup.
+_data_cache: Optional[list] = None
+_data_cache_mtime: float = -1.0
+_data_index: dict = {}  # date_internal -> [entry, ...]
+
+
+def _build_data_index(data: list) -> dict:
+    """Build a date -> [entries] mapping from a data list."""
+    idx: dict = {}
+    for entry in data:
+        d = entry.get('Datum', '')
+        if d:
+            idx.setdefault(d, []).append(entry)
+    return idx
+
 
 def load_config():
     """Lädt die Konfiguration aus der config.json (cached by mtime)."""
@@ -606,6 +622,20 @@ PUBLIC_HOLIDAYS = get_public_holidays()
 # --- Hilfsfunktionen ---
 
 def load_data():
+    """Load CSV data with mtime-based caching.
+
+    Returns the shared cached list. Callers that mutate entries mutate the
+    cache directly; call save_data() afterwards which will refresh the index.
+    """
+    global _data_cache, _data_cache_mtime, _data_index
+    if os.path.exists(CSV_FILE):
+        try:
+            mtime = os.path.getmtime(CSV_FILE)
+            if _data_cache is not None and mtime == _data_cache_mtime:
+                return _data_cache
+        except Exception:
+            pass
+
     data = []
     if os.path.exists(CSV_FILE):
         with open(CSV_FILE, mode='r', newline='', encoding='utf-8') as file:
@@ -615,6 +645,12 @@ def load_data():
                     if field not in row:
                         row[field] = ''
                 data.append(row)
+    try:
+        _data_cache_mtime = os.path.getmtime(CSV_FILE) if os.path.exists(CSV_FILE) else -1.0
+    except Exception:
+        _data_cache_mtime = -1.0
+    _data_cache = data
+    _data_index = _build_data_index(data)
     return data
 
 
@@ -680,6 +716,7 @@ def print_header():
     print(f"\n--- Arbeitszeittracker{name_info} ---")
 
 def save_data(data):
+    global _data_cache, _data_cache_mtime, _data_index
     fieldnames = ['Datum', 'Typ', 'Startzeit', 'Endzeit', 'Dauer', 'Kommentar']
     tmp = CSV_FILE + '.tmp'
     try:
@@ -702,6 +739,13 @@ def save_data(data):
             except Exception:
                 pass
         os.replace(tmp, CSV_FILE)
+        # Update cache directly — no need to re-read what we just wrote
+        _data_cache = data
+        try:
+            _data_cache_mtime = os.path.getmtime(CSV_FILE)
+        except Exception:
+            _data_cache_mtime = -1.0
+        _data_index = _build_data_index(data)
     finally:
         try:
             if os.path.exists(tmp):
@@ -710,14 +754,21 @@ def save_data(data):
             pass
 
 def get_entry_by_date(data, target_date_internal):
+    """Return the first entry for a date. Uses the in-memory index when data is the cached list."""
+    if data is _data_cache and _data_index:
+        entries = _data_index.get(target_date_internal)
+        return entries[0] if entries else None
+    # Fallback: linear scan (custom list or cache not yet populated)
     for entry in data:
-        if entry['Datum'] == target_date_internal:
+        if entry.get('Datum') == target_date_internal:
             return entry
     return None
 
 
 def get_entries_by_date(data, target_date_internal):
-    """Return all entries whose Datum matches target_date_internal."""
+    """Return all entries whose Datum matches target_date_internal. Uses the index when data is the cached list."""
+    if data is _data_cache and _data_index:
+        return list(_data_index.get(target_date_internal, []))
     return [e for e in data if e.get('Datum') == target_date_internal]
 
 
