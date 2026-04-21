@@ -26,12 +26,17 @@ if os.environ.get('FORCE_PROMPT_TOOLKIT') == '1':
             HAVE_PROMPT_TOOLKIT = True
         except Exception:
             print('WARNING: FORCE_PROMPT_TOOLKIT set but prompt_toolkit is not importable.')
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.units import inch
-from reportlab.lib import colors
-import os
+
+# Hoist prompt_toolkit key-binding helpers once at import time (avoids repeated imports in loops)
+_KeyBindings = None
+_Document = None
+try:
+    from prompt_toolkit.key_binding import KeyBindings as _KeyBindings
+    from prompt_toolkit.document import Document as _Document
+except Exception:
+    pass
+
+# reportlab is imported lazily inside generate_pdf_report() to keep startup fast for quick actions.
 
 # --- Konfiguration ---
 CSV_FILE             = 'arbeitszeiten.csv'
@@ -53,17 +58,36 @@ CSV_INJECTION_PREFIX_CHARS = ('=', '+', '-', '@')
 
 # --- Konfigurationsverwaltung ---
 
+# Simple mtime-based config cache so repeated load_config() calls within one operation
+# (e.g. compute_saldo + get_user_name + print_header) hit disk only once.
+_config_cache: Optional[dict] = None
+_config_cache_mtime: float = -1.0
+
+
 def load_config():
-    """Lädt die Konfiguration aus der config.json."""
+    """Lädt die Konfiguration aus der config.json (cached by mtime)."""
+    global _config_cache, _config_cache_mtime
+    if os.path.exists(CONFIG_FILE):
+        try:
+            mtime = os.path.getmtime(CONFIG_FILE)
+            if _config_cache is not None and mtime == _config_cache_mtime:
+                return _config_cache
+        except Exception:
+            pass
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, mode='r', encoding='utf-8') as f:
                 cfg = json.load(f)
                 # ensure expected keys exist
                 if not isinstance(cfg, dict):
-                    return {'name': '', 'holidays': {}}
+                    cfg = {'name': '', 'holidays': {}}
                 if 'holidays' not in cfg:
                     cfg['holidays'] = {}
+                try:
+                    _config_cache_mtime = os.path.getmtime(CONFIG_FILE)
+                except Exception:
+                    _config_cache_mtime = -1.0
+                _config_cache = cfg
                 return cfg
         except (json.JSONDecodeError, IOError):
             # Backup corrupt config for inspection rather than silently ignore
@@ -72,7 +96,10 @@ def load_config():
                 os.replace(CONFIG_FILE, corrupt_name)
             except Exception:
                 pass
-    return {'name': '', 'holidays': {}}
+    default = {'name': '', 'holidays': {}}
+    _config_cache = default
+    _config_cache_mtime = -1.0
+    return default
 
 def save_config(config):
     """Speichert die Konfiguration in der config.json."""
@@ -82,6 +109,7 @@ def save_config(config):
         name = name.replace('\x00', '')[:MAX_NAME_LEN]
         config['name'] = name
 
+    global _config_cache, _config_cache_mtime
     tmp = CONFIG_FILE + '.tmp'
     try:
         with open(tmp, mode='w', encoding='utf-8') as f:
@@ -92,6 +120,9 @@ def save_config(config):
             except Exception:
                 pass
         os.replace(tmp, CONFIG_FILE)
+        # Invalidate cache so next load_config() reads the fresh file
+        _config_cache = None
+        _config_cache_mtime = -1.0
     finally:
         try:
             if os.path.exists(tmp):
@@ -228,20 +259,13 @@ def input_date(prompt):
         # use prompt_toolkit if available; tests can monkeypatch _prompt
         if _prompt:
             try:
-                # try to provide arrow-key Up/Down to change the date if prompt_toolkit supports key bindings
-                try:
-                    from prompt_toolkit.key_binding import KeyBindings
-                    from prompt_toolkit.document import Document
-                except Exception:
-                    KeyBindings = None
-
-                if KeyBindings:
-                    kb = KeyBindings()
+                # Use module-level _KeyBindings/_Document (imported once at startup)
+                if _KeyBindings:
+                    kb = _KeyBindings()
 
                     def _adjust_buffer(buf, new_text):
                         try:
-                            # set_document is available on buffers
-                            buf.set_document(Document(new_text, cursor_position=len(new_text)), bypass_undo=True)
+                            buf.set_document(_Document(new_text, cursor_position=len(new_text)), bypass_undo=True)
                         except Exception:
                             buf.text = new_text
 
@@ -454,19 +478,13 @@ def input_time(prompt: str, default: Optional[str] = None) -> str:
     while True:
         if _prompt:
             try:
-                # try to provide arrow-key Up/Down to change the time if prompt_toolkit supports key bindings
-                try:
-                    from prompt_toolkit.key_binding import KeyBindings
-                    from prompt_toolkit.document import Document
-                except Exception:
-                    KeyBindings = None
-
-                if KeyBindings:
-                    kb = KeyBindings()
+                # Use module-level _KeyBindings/_Document (imported once at startup)
+                if _KeyBindings:
+                    kb = _KeyBindings()
 
                     def _adjust_buffer(buf, new_text):
                         try:
-                            buf.set_document(Document(new_text, cursor_position=len(new_text)), bypass_undo=True)
+                            buf.set_document(_Document(new_text, cursor_position=len(new_text)), bypass_undo=True)
                         except Exception:
                             buf.text = new_text
 
@@ -1287,6 +1305,13 @@ def edit_work_end():
 # --- PDF Report ---
 
 def generate_pdf_report():
+    # Lazy imports — reportlab is heavy; only load it when actually generating a PDF
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+
     data = load_data()
     if not data:
         print("Keine Daten vorhanden.")
