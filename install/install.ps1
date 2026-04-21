@@ -71,24 +71,39 @@ Write-DebugLog "Binary directory: $binDir"
 
 # --- Copy the entire onedir bundle ----------------------------------------
 # /IS + /IT  : always overwrite existing files (same size, tweaked timestamps)
-# /XF        : never touch the CSV database (preserve user data)
-# Use robocopy for reliability; fall back to Copy-Item on unexpected failures.
-$csvName = 'arbeitszeiten.csv'
-$robocopyArgs = @($binDir, $Dest, '/E', '/IS', '/IT', '/XF', $csvName, '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
+# /XF        : never overwrite user data files
+# /XD        : never overwrite user data directories
+# Protected files/dirs (user data that must survive a reinstall):
+#   arbeitszeiten.csv   - time-tracking database
+#   config.json         - user configuration (Soll-Stunden, holidays file, name, ...)
+#   checkin_state.json  - open-shift sidecar used by quick actions
+#   feiertage*.csv      - public-holiday tables imported by the user
+#   reports/            - generated PDF reports
+$protectedFiles = @('arbeitszeiten.csv', 'config.json', 'checkin_state.json', 'feiertage*.csv', 'holidays*.csv')
+$protectedDirs  = @('reports')
+$robocopyArgs = @($binDir, $Dest, '/E', '/IS', '/IT') +
+                @('/XF') + $protectedFiles +
+                @('/XD') + $protectedDirs +
+                @('/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
 & robocopy @robocopyArgs | Out-Null
 Write-DebugLog "robocopy exit code: $LASTEXITCODE"
 if ($LASTEXITCODE -ge 8) {
     # robocopy exit codes 0-7 are success; 8+ are errors
     Write-Warning "robocopy reported errors (code $LASTEXITCODE). Falling back to Copy-Item."
-    # Copy everything except the CSV database
+    # Copy everything except protected user-data files/dirs
+    $protectedExact = @('arbeitszeiten.csv', 'config.json', 'checkin_state.json')
     Get-ChildItem -Path $binDir -Recurse | Where-Object {
-        -not $_.PSIsContainer -and $_.Name -ne $csvName
+        if ($_.PSIsContainer) { return $_.Name -notin $protectedDirs }
+        if ($_.Name -in $protectedExact) { return $false }
+        if ($_.Name -like 'feiertage*.csv') { return $false }
+        if ($_.Name -like 'holidays*.csv') { return $false }
+        return $true
     } | ForEach-Object {
         $rel  = $_.FullName.Substring($binDir.Length).TrimStart('\','/')
         $dest = Join-Path $Dest $rel
         $dir  = Split-Path $dest -Parent
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        Copy-Item -Path $_.FullName -Destination $dest -Force
+        if (-not $_.PSIsContainer) { Copy-Item -Path $_.FullName -Destination $dest -Force }
     }
 }
 
