@@ -23,6 +23,12 @@ jobs:
           if (Test-Path requirements.txt) { python -m pip install -r requirements.txt } else { Write-Host 'No requirements.txt' }
         shell: pwsh
 
+      - name: Build executable
+        run: |
+          python -m pip install pyinstaller
+          pyinstaller install/work_timer.spec --distpath dist --workpath build
+        shell: pwsh
+
       - name: Generate installer folder
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\\install\\generate_install_folder.ps1 -OutDir WorkTimerInstall_release -Force
         shell: pwsh

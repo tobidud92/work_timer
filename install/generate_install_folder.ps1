@@ -12,9 +12,11 @@ if (Test-Path $out) {
 }
 New-Item -Path $out -ItemType Directory | Out-Null
 
-# Copy the installer script from the install/ folder
+# Copy the installer script and bat launcher from the install/ folder
 $instScript = Join-Path $PSScriptRoot 'install.ps1'
 if (Test-Path $instScript) { Copy-Item -Path $instScript -Destination $out -Force }
+$instBat = Join-Path $PSScriptRoot 'install.bat'
+if (Test-Path $instBat) { Copy-Item -Path $instBat -Destination $out -Force }
 
 # Copy any .exe artifacts from common build output locations
 $exePatterns = @("dist/*.exe", "build/*.exe")
