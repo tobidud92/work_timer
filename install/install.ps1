@@ -73,6 +73,21 @@ Write-Host "Quelle : $binDir"
 Write-Host "Ziel   : $Dest"
 Write-Host ''
 
+# --- Clean up stale/corrupt directories left by previous installs --------
+# The previous buggy installer created snowball paths in $Dest (e.g.
+# work_timer.exe\work_timer_quick.exe\...). These cause robocopy code 16
+# (MAX_PATH exceeded). Remove any top-level directory in $Dest that is not
+# a known good subdir (_internal = PyInstaller bundle, reports = user data).
+$knownDirs = @('_internal', 'reports')
+Get-ChildItem -Path $Dest -Directory -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -notin $knownDirs
+} | ForEach-Object {
+    Write-Host "Bereinige veraltetes Verzeichnis: $($_.Name)"
+    Write-DebugLog "Removing stale dir: $($_.FullName)"
+    # Use cmd to handle MAX_PATH paths that PowerShell can't remove directly
+    & cmd /c "rmdir /s /q `"$($_.FullName)`"" 2>$null
+}
+
 # --- Copy the entire onedir bundle ----------------------------------------
 # /IS + /IT  : always overwrite existing files (same size, tweaked timestamps)
 # /XF        : never overwrite user data files
@@ -130,18 +145,23 @@ if ($robocopyExit -ge 8) {
     Write-Host ' fertig.'
 }
 
-Write-Host 'Kopiere Icons...' -NoNewline
 # --- Remove existing shortcuts before copying icons -----------------------
 # Explorer holds .ico files open as long as a shortcut that references them
 # exists. Removing the shortcuts first releases the lock so Copy-Item succeeds.
 $desktop = [Environment]::GetFolderPath('Desktop')
+$removedShortcut = $false
 foreach ($lnk in @('Kommen.lnk', 'Gehen.lnk', 'WorkTimer.lnk')) {
     $lnkPath = Join-Path $desktop $lnk
     if (Test-Path $lnkPath) {
         Remove-Item -Path $lnkPath -Force -ErrorAction SilentlyContinue
         Write-DebugLog "Removed existing shortcut: $lnkPath"
+        $removedShortcut = $true
     }
 }
+# Give Explorer time to release the .ico file handles after shortcut removal
+if ($removedShortcut) { Start-Sleep -Milliseconds 1500 }
+
+Write-Host 'Kopiere Icons...' -NoNewline
 
 # --- Copy icons (stored next to install.ps1, not inside the bundle) -------
 foreach ($ico in @('Kommen.ico', 'Gehen.ico', 'WorkTimer.ico')) {
