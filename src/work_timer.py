@@ -6,35 +6,42 @@ import shutil
 import sys
 from typing import Optional
 
-# Optional interactive prompt support (prompt_toolkit)
+# Optional interactive prompt support (prompt_toolkit) — imported lazily on first use
+# so that quick actions (--start-now / --end-now) never pay the ~500 ms import cost.
 _prompt = None
 HAVE_PROMPT_TOOLKIT = False
-try:
-    from prompt_toolkit import shortcuts
-    _prompt = shortcuts.prompt
-    HAVE_PROMPT_TOOLKIT = True
-except Exception:
-    _prompt = None
-    HAVE_PROMPT_TOOLKIT = False
+_KeyBindings = None
+_Document = None
+_prompt_toolkit_initialized = False
 
-# Allow forcing prompt_toolkit usage via environment variable (useful in packaged runs)
-if os.environ.get('FORCE_PROMPT_TOOLKIT') == '1':
-    if not HAVE_PROMPT_TOOLKIT:
+def _ensure_prompt_toolkit():
+    """Import prompt_toolkit on the first call; no-op afterwards."""
+    global _prompt, HAVE_PROMPT_TOOLKIT, _KeyBindings, _Document, _prompt_toolkit_initialized
+    if _prompt_toolkit_initialized:
+        return
+    _prompt_toolkit_initialized = True
+    try:
+        from prompt_toolkit import shortcuts as _pt_shortcuts
+        _prompt = _pt_shortcuts.prompt
+        HAVE_PROMPT_TOOLKIT = True
+    except Exception:
+        pass
+    # Allow forcing via env var (useful in packaged runs)
+    if os.environ.get('FORCE_PROMPT_TOOLKIT') == '1' and not HAVE_PROMPT_TOOLKIT:
         try:
-            from prompt_toolkit import shortcuts as _shortcuts_force
-            _prompt = _shortcuts_force.prompt
+            from prompt_toolkit import shortcuts as _pt_force
+            _prompt = _pt_force.prompt
             HAVE_PROMPT_TOOLKIT = True
         except Exception:
             print('WARNING: FORCE_PROMPT_TOOLKIT set but prompt_toolkit is not importable.')
-
-# Hoist prompt_toolkit key-binding helpers once at import time (avoids repeated imports in loops)
-_KeyBindings = None
-_Document = None
-try:
-    from prompt_toolkit.key_binding import KeyBindings as _KeyBindings
-    from prompt_toolkit.document import Document as _Document
-except Exception:
-    pass
+    if HAVE_PROMPT_TOOLKIT:
+        try:
+            from prompt_toolkit.key_binding import KeyBindings as _KB
+            from prompt_toolkit.document import Document as _Doc
+            _KeyBindings = _KB
+            _Document = _Doc
+        except Exception:
+            pass
 
 # reportlab is imported lazily inside generate_pdf_report() to keep startup fast for quick actions.
 
@@ -273,6 +280,7 @@ def to_internal(date_str_display):
 def input_date(prompt):
     today_display = datetime.now().strftime(DATE_FORMAT_DISPLAY)
     full_prompt = prompt + f" (TT.MM.JJJJ, z.B. {today_display}): "
+    _ensure_prompt_toolkit()  # lazy-load prompt_toolkit on first interactive use
     while True:
         # use prompt_toolkit if available; tests can monkeypatch _prompt
         if _prompt:
@@ -637,6 +645,7 @@ def input_time(prompt: str, default: Optional[str] = None) -> str:
     if default is None:
         default = datetime.now().strftime(TIME_FORMAT)
     full_prompt = prompt + f" (HH:MM) [{default}]: "
+    _ensure_prompt_toolkit()  # lazy-load prompt_toolkit on first interactive use
     while True:
         if _prompt:
             try:
