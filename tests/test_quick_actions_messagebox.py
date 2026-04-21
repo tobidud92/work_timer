@@ -72,7 +72,7 @@ class TestQuickActionsMessageBox(unittest.TestCase):
     def test_quick_end_without_start_shows_warning(self):
         # no entries
         wt.quick_end_action()
-        self.assertTrue(any('Kein Arbeitsbeginn gefunden' in t for t, m in self.msg_calls))
+        self.assertTrue(any('Kein offenes Intervall' in t for t, m in self.msg_calls))
 
     def test_quick_end_success_sets_endtime(self):
         today = datetime.now().strftime(wt.DATE_FORMAT_INTERNAL)
@@ -86,9 +86,8 @@ class TestQuickActionsMessageBox(unittest.TestCase):
         today = datetime.now().strftime(wt.DATE_FORMAT_INTERNAL)
         self.data_store.append({'Datum': today, 'Typ': 'Arbeit', 'Startzeit': '08:00', 'Endzeit': '12:00', 'Dauer': '4.00', 'Kommentar': ''})
         wt.quick_end_action()
-        # message changed: all shifts closed
-        self.assertTrue(any('Bereits ausgecheckt' in t or 'abgeschlossen' in m
-                            for t, m in self.msg_calls))
+        # no open interval -> shows 'Kein offenes Intervall'
+        self.assertTrue(any('Kein offenes Intervall' in t for t, m in self.msg_calls))
 
     def test_quick_start_blocked_when_shift_open(self):
         """Re-checkin must be blocked when a shift is still open (no Endzeit)."""

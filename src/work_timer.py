@@ -76,6 +76,7 @@ _config_cache_mtime: float = -1.0
 # _data_index maps date string -> list[entry] for O(1) lookup.
 _data_cache: Optional[list] = None
 _data_cache_mtime: float = -1.0
+_data_cache_path: str = ''     # CSV_FILE path the cache was built from
 _data_index: dict = {}  # date_internal -> [entry, ...]
 
 
@@ -465,7 +466,7 @@ def _append_data_row(entry: dict) -> None:
     the in-memory data cache is invalidated so the next load_data() call picks
     up the change.
     """
-    global _data_cache, _data_cache_mtime, _data_index
+    global _data_cache, _data_cache_mtime, _data_cache_path, _data_index
     fieldnames = ['Datum', 'Typ', 'Startzeit', 'Endzeit', 'Dauer', 'Kommentar']
     safe_row = {
         'Datum':      sanitize_for_csv(entry.get('Datum', '')),
@@ -489,6 +490,7 @@ def _append_data_row(entry: dict) -> None:
     # Invalidate the data cache so the next interactive load_data() re-reads from disk
     _data_cache = None
     _data_cache_mtime = -1.0
+    _data_cache_path = ''
     _data_index = {}
 
 
@@ -498,54 +500,41 @@ def quick_start_action():
     today_display  = datetime.now().strftime(DATE_FORMAT_DISPLAY)
     now_str        = datetime.now().strftime(TIME_FORMAT)
 
-    # ── Fast path: consult sidecar only (no CSV I/O) ──────────────────────────
+    # ── Fast path: sidecar only (no CSV I/O) ────────────────────────────
     state = _load_checkin_state()
     open_shift = state.get('open_shift')
     if open_shift and open_shift.get('date') == today_internal:
         _show_messagebox('Bereits eingecheckt',
-                         f"Sie sind bereits am {today_display} um {open_shift['start']} "
-                         f"eingecheckt.\nBitte buchen Sie zuerst 'Gehen', bevor Sie "
-                         f"erneut 'Kommen' buchen.")
+                         f"Intervall seit {open_shift['start']} ist noch offen.\n"
+                         f"Bitte zuerst 'Gehen' buchen.")
         _log_quick_action('start', 'skipped',
-                          f"state fast-path: already checked in {open_shift['start']}")
+                          f"fast-path: open interval since {open_shift['start']}")
         return
 
-    # ── Slow path: load CSV for conflict/multi-shift checks ───────────────────
+    # ── Slow path: load CSV to verify and get shift count ─────────────────
     data = load_data()
-
-    # Check for a non-Arbeit entry that would block check-in
-    non_arbeit = next((e for e in get_entries_by_date(data, today_internal)
-                       if e.get('Typ') not in ('Arbeit', None, '')), None)
-    if non_arbeit:
-        _show_messagebox('Eintrag-Konflikt',
-                         f"Für {today_display} existiert ein Eintrag vom Typ "
-                         f"'{non_arbeit.get('Typ')}'. Bitte überprüfen.")
-        _log_quick_action('start', 'error', f"entry conflict type={non_arbeit.get('Typ')}")
-        return
-
     today_arbeit = [e for e in get_entries_by_date(data, today_internal)
                     if e.get('Typ') == 'Arbeit']
 
-    if today_arbeit:
-        last = today_arbeit[-1]
-        if last.get('Startzeit') and not last.get('Endzeit'):
-            # State was stale — block and refresh state
-            _show_messagebox('Bereits eingecheckt',
-                             f"Sie sind bereits am {today_display} um {last['Startzeit']} "
-                             f"eingecheckt.\nBitte buchen Sie zuerst 'Gehen', bevor Sie "
-                             f"erneut 'Kommen' buchen.")
-            _log_quick_action('start', 'skipped',
-                              f"already checked in {last.get('Startzeit')}")
-            _save_checkin_state(_derive_checkin_state(data))  # refresh stale state
-            return
-        # Last shift is complete → allow another check-in
+    # Check if there is any open Arbeit interval today
+    open_entry = next(
+        (e for e in reversed(today_arbeit) if e.get('Startzeit') and not e.get('Endzeit')),
+        None
+    )
+    if open_entry:
+        # State was stale — refresh and warn
+        _save_checkin_state(_derive_checkin_state(data))
+        _show_messagebox('Bereits eingecheckt',
+                         f"Intervall seit {open_entry['Startzeit']} ist noch offen.\n"
+                         f"Bitte zuerst 'Gehen' buchen.")
+        _log_quick_action('start', 'skipped', f"open interval {open_entry['Startzeit']}")
+        return
 
-    # ── Write: append a single row rather than rewriting the whole CSV ─────────
+    # No open interval — append a new one
     new_entry = {'Datum': today_internal, 'Typ': 'Arbeit',
                  'Startzeit': now_str, 'Endzeit': '', 'Dauer': '', 'Kommentar': ''}
     _append_data_row(new_entry)
     shift_num = len(today_arbeit) + 1
-    # Write fresh state immediately so the next quick action sees it
     _save_checkin_state({'version': 1,
                          'open_shift': {'date': today_internal,
                                         'start': now_str,
@@ -564,29 +553,14 @@ def quick_end_action():
     today_display  = datetime.now().strftime(DATE_FORMAT_DISPLAY)
     now_str        = datetime.now().strftime(TIME_FORMAT)
 
-    # ── Fast path: consult sidecar only (no CSV I/O) ──────────────────────────
+    # ── Fast path: sidecar only (no CSV I/O) ────────────────────────────
     state = _load_checkin_state()
     open_shift = state.get('open_shift')
     if not open_shift or open_shift.get('date') != today_internal:
-        # No open shift according to the sidecar
-        last_co = state.get('last_checkout', {})
-        if last_co.get('date') == today_internal:
-            _show_messagebox('Bereits ausgecheckt',
-                             f"Alle Schichten für heute sind abgeschlossen.\n"
-                             f"Letzte Schicht: {last_co.get('start','?')} – "
-                             f"{last_co.get('time','?')}.")
-            _log_quick_action('end', 'skipped', 'state fast-path: all shifts closed')
-        elif last_co.get('date') and last_co.get('time'):
-            _show_messagebox('Kein Arbeitsbeginn gefunden',
-                             f"Kein Arbeitsbeginn für heute gefunden.\n"
-                             f"Letzter Checkout: {to_display(last_co['date'])} um "
-                             f"{last_co['time']}. Aktion abgebrochen.")
-            _log_quick_action('end', 'error',
-                              f"state fast-path: no start, last {last_co['date']} {last_co['time']}")
-        else:
-            _show_messagebox('Kein Arbeitsbeginn gefunden',
-                             "Kein Arbeitsbeginn für heute gefunden. Aktion abgebrochen.")
-            _log_quick_action('end', 'error', 'state fast-path: no start found')
+        _show_messagebox('Kein offenes Intervall',
+                         f"Kein offenes Intervall für heute gefunden.\n"
+                         f"Bitte zuerst 'Kommen' buchen.")
+        _log_quick_action('end', 'skipped', 'fast-path: no open interval')
         return
 
     # ── Slow path: load CSV to find and patch the open entry ──────────────────
@@ -594,34 +568,18 @@ def quick_end_action():
     today_arbeit = [e for e in get_entries_by_date(data, today_internal)
                     if e.get('Typ') == 'Arbeit']
 
-    # Find the last open shift (has Startzeit, no Endzeit)
     open_entry = next(
         (e for e in reversed(today_arbeit) if e.get('Startzeit') and not e.get('Endzeit')),
         None
     )
 
     if not open_entry:
-        # State was stale — refresh and report
-        _save_checkin_state(_derive_checkin_state(data))  # refresh stale state
-        if today_arbeit:
-            last = today_arbeit[-1]
-            _show_messagebox('Bereits ausgecheckt',
-                             f"Alle Schichten für heute sind abgeschlossen.\n"
-                             f"Letzte Schicht: {last.get('Startzeit','?')} – "
-                             f"{last.get('Endzeit','?')}.")
-            _log_quick_action('end', 'skipped', 'all shifts closed')
-        else:
-            last_date, last_time = _get_last_checkout_time(data)
-            if last_time:
-                _show_messagebox('Kein Arbeitsbeginn gefunden',
-                                 f"Kein Arbeitsbeginn für heute gefunden.\n"
-                                 f"Letzter Checkout: {last_date} um {last_time}. "
-                                 f"Aktion abgebrochen.")
-                _log_quick_action('end', 'error', f"no start found, last {last_date} {last_time}")
-            else:
-                _show_messagebox('Kein Arbeitsbeginn gefunden',
-                                 "Kein Arbeitsbeginn für heute gefunden. Aktion abgebrochen.")
-                _log_quick_action('end', 'error', 'no start found')
+        # State was stale — refresh and warn
+        _save_checkin_state(_derive_checkin_state(data))
+        _show_messagebox('Kein offenes Intervall',
+                         f"Kein offenes Intervall für heute gefunden.\n"
+                         f"Bitte zuerst 'Kommen' buchen.")
+        _log_quick_action('end', 'skipped', 'stale state: no open interval')
         return
 
     open_entry['Endzeit'] = now_str
@@ -782,11 +740,11 @@ def load_data():
     Returns the shared cached list. Callers that mutate entries mutate the
     cache directly; call save_data() afterwards which will refresh the index.
     """
-    global _data_cache, _data_cache_mtime, _data_index
+    global _data_cache, _data_cache_mtime, _data_cache_path, _data_index
     if os.path.exists(CSV_FILE):
         try:
             mtime = os.path.getmtime(CSV_FILE)
-            if _data_cache is not None and mtime == _data_cache_mtime:
+            if _data_cache is not None and mtime == _data_cache_mtime and CSV_FILE == _data_cache_path:
                 return _data_cache
         except Exception:
             pass
@@ -804,6 +762,7 @@ def load_data():
         _data_cache_mtime = os.path.getmtime(CSV_FILE) if os.path.exists(CSV_FILE) else -1.0
     except Exception:
         _data_cache_mtime = -1.0
+    _data_cache_path = CSV_FILE
     _data_cache = data
     _data_index = _build_data_index(data)
     return data
@@ -871,7 +830,7 @@ def print_header():
     print(f"\n--- Arbeitszeittracker{name_info} ---")
 
 def save_data(data):
-    global _data_cache, _data_cache_mtime, _data_index
+    global _data_cache, _data_cache_mtime, _data_cache_path, _data_index
     fieldnames = ['Datum', 'Typ', 'Startzeit', 'Endzeit', 'Dauer', 'Kommentar']
     tmp = CSV_FILE + '.tmp'
     try:
@@ -896,6 +855,7 @@ def save_data(data):
         os.replace(tmp, CSV_FILE)
         # Update cache directly — no need to re-read what we just wrote
         _data_cache = data
+        _data_cache_path = CSV_FILE
         try:
             _data_cache_mtime = os.path.getmtime(CSV_FILE)
         except Exception:
