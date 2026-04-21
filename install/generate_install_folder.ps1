@@ -18,12 +18,23 @@ if (Test-Path $instScript) { Copy-Item -Path $instScript -Destination $out -Forc
 $instBat = Join-Path $PSScriptRoot 'install.bat'
 if (Test-Path $instBat) { Copy-Item -Path $instBat -Destination $out -Force }
 
-# Copy any .exe artifacts from common build output locations
-$exePatterns = @("dist/*.exe", "build/*.exe")
-foreach ($pattern in $exePatterns) {
-    $fullPattern = Join-Path $root $pattern
-    $found = Get-ChildItem -Path $fullPattern -File -ErrorAction SilentlyContinue
-    if ($found) { foreach ($f in $found) { Copy-Item $f.FullName $out -Force } ; break }
+# ── Copy the onedir bundle (dist/work_timer/) ─────────────────────────────
+# The build produces dist/work_timer/ containing work_timer.exe,
+# work_timer_quick.exe and all required DLLs / .pyd / _internal/.
+$bundleDir = Join-Path $root 'dist\work_timer'
+if (Test-Path $bundleDir) {
+    $bundleDest = Join-Path $out 'work_timer'
+    Copy-Item -Path $bundleDir -Destination $bundleDest -Recurse -Force
+    Write-Host "Copied onedir bundle: $bundleDir -> $bundleDest"
+} else {
+    # Fallback: look for any .exe in dist/ or build/ (legacy onefile builds)
+    $exePatterns = @("dist/*.exe", "build/*.exe")
+    foreach ($pattern in $exePatterns) {
+        $fullPattern = Join-Path $root $pattern
+        $found = Get-ChildItem -Path $fullPattern -File -ErrorAction SilentlyContinue
+        if ($found) { foreach ($f in $found) { Copy-Item $f.FullName $out -Force } ; break }
+    }
+    Write-Warning "Onedir bundle not found at $bundleDir — copied loose EXE files as fallback."
 }
 
 # Copy .ico files from data/ (canonical location)
@@ -35,6 +46,7 @@ $extras = @("README.md","docs/README.md")
 foreach ($f in $extras) { if (Test-Path (Join-Path $root $f)) { Copy-Item -Path (Join-Path $root $f) -Destination $out -Force } }
 
 Write-Host "Packaged files into $out"
-Get-ChildItem $out
+Get-ChildItem $out -Recurse | Select-Object FullName
 
 Exit 0
+

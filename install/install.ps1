@@ -23,7 +23,6 @@ function Copy-FileRetry {
         [int]$Retries = 6,
         [int]$DelayMs = 300
     )
-    $destFile = Join-Path $DestDir (Split-Path $SrcPath -Leaf)
     for ($i = 0; $i -lt $Retries; $i++) {
         try {
             Copy-Item -Path $SrcPath -Destination $DestDir -Force -ErrorAction Stop
@@ -58,53 +57,68 @@ if (-not (Test-Path $Dest)) {
     try { New-Item -ItemType Directory -Path $Dest -Force | Out-Null } catch { Write-DebugLog ("Failed to create {0}: {1}" -f $Dest, $_); throw }
 }
 
-# Find exe: search Source, then Source\dist, then parent
-$exe = Get-ChildItem -Path $Source -Filter 'work_timer.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $exe) { $exe = Get-ChildItem -Path (Join-Path $Source 'dist') -Filter 'work_timer.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 }
-if (-not $exe) { $parent = Split-Path -Path $Source -Parent; if ($parent) { $exe = Get-ChildItem -Path $parent -Filter 'work_timer.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 } }
-if (-not $exe) { Write-Error 'work_timer.exe not found'; exit 1 }
-Write-DebugLog "Found exe: $($exe.FullName)"
+# ── Find the onedir bundle (directory containing work_timer.exe) ───────────
+# Build output is dist/work_timer/ — search Source and common parent locations.
+$mainExe = Get-ChildItem -Path $Source -Filter 'work_timer.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $mainExe) {
+    $parent = Split-Path -Path $Source -Parent
+    if ($parent) { $mainExe = Get-ChildItem -Path $parent -Filter 'work_timer.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 }
+}
+if (-not $mainExe) { Write-Error 'work_timer.exe not found'; exit 1 }
 
-# Find icons
-$kommen = Get-ChildItem -Path $Source -Filter 'Kommen.ico' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-$gehen = Get-ChildItem -Path $Source -Filter 'Gehen.ico' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-$workico = Get-ChildItem -Path $Source -Filter 'WorkTimer.ico' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+$binDir = Split-Path -Parent $mainExe.FullName
+Write-DebugLog "Binary directory: $binDir"
 
-# Copy files
-Copy-FileRetry -SrcPath $exe.FullName -DestDir $Dest
-if ($kommen)  { Copy-FileRetry -SrcPath $kommen.FullName  -DestDir $Dest }
-if ($gehen)   { Copy-FileRetry -SrcPath $gehen.FullName   -DestDir $Dest }
-if ($workico) { Copy-FileRetry -SrcPath $workico.FullName -DestDir $Dest }
+# ── Copy the entire onedir bundle ─────────────────────────────────────────
+# Use robocopy for reliability; fall back to Copy-Item on unexpected failures.
+$robocopyArgs = @($binDir, $Dest, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
+$rc = & robocopy @robocopyArgs
+Write-DebugLog "robocopy exit code: $LASTEXITCODE"
+if ($LASTEXITCODE -ge 8) {
+    # robocopy exit codes 0-7 are success; 8+ are errors
+    Write-Warning "robocopy reported errors (code $LASTEXITCODE). Falling back to Copy-Item."
+    Copy-Item -Path (Join-Path $binDir '*') -Destination $Dest -Recurse -Force
+}
+
+# ── Copy icons (stored next to install.ps1, not inside the bundle) ────────
+foreach ($ico in @('Kommen.ico', 'Gehen.ico', 'WorkTimer.ico')) {
+    $found = Get-ChildItem -Path $Source -Filter $ico -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) { Copy-FileRetry -SrcPath $found.FullName -DestDir $Dest }
+}
 
 Write-DebugLog "Files copied to $Dest"
 
-$exePath = Join-Path $Dest 'work_timer.exe'
+$exePath      = Join-Path $Dest 'work_timer.exe'
+$quickExePath = Join-Path $Dest 'work_timer_quick.exe'
+# Fall back to main exe if quick exe not present (e.g. older build)
+if (-not (Test-Path $quickExePath)) { $quickExePath = $exePath }
 
-# Create shortcuts unless skipped
+# ── Create shortcuts ──────────────────────────────────────────────────────
 if (-not $SkipShortcuts) {
     try {
         $w = New-Object -ComObject WScript.Shell
         $desktop = [Environment]::GetFolderPath('Desktop')
 
+        # Kommen: use quick exe (no console window, fast startup)
         $s = $w.CreateShortcut((Join-Path $desktop 'Kommen.lnk'))
-        $s.TargetPath = $exePath
-        $s.Arguments = '--start-now'
-        $s.IconLocation = (Join-Path $Dest 'Kommen.ico') + ',0'
+        $s.TargetPath      = $quickExePath
+        $s.Arguments       = '--start-now'
+        $s.IconLocation    = (Join-Path $Dest 'Kommen.ico') + ',0'
         $s.WorkingDirectory = $Dest
-        $s.WindowStyle = 7  # SW_SHOWMINNOACTIVE: starts minimized, no console flash in foreground
         $s.Save()
 
+        # Gehen: use quick exe
         $s = $w.CreateShortcut((Join-Path $desktop 'Gehen.lnk'))
-        $s.TargetPath = $exePath
-        $s.Arguments = '--end-now'
-        $s.IconLocation = (Join-Path $Dest 'Gehen.ico') + ',0'
+        $s.TargetPath      = $quickExePath
+        $s.Arguments       = '--end-now'
+        $s.IconLocation    = (Join-Path $Dest 'Gehen.ico') + ',0'
         $s.WorkingDirectory = $Dest
-        $s.WindowStyle = 7
         $s.Save()
 
+        # WorkTimer: full interactive app
         $s = $w.CreateShortcut((Join-Path $desktop 'WorkTimer.lnk'))
-        $s.TargetPath = $exePath
-        $s.IconLocation = (Join-Path $Dest 'WorkTimer.ico') + ',0'
+        $s.TargetPath      = $exePath
+        $s.IconLocation    = (Join-Path $Dest 'WorkTimer.ico') + ',0'
         $s.WorkingDirectory = $Dest
         $s.Save()
     } catch {
