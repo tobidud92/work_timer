@@ -68,6 +68,10 @@ if (-not $mainExe) { Write-Error 'work_timer.exe not found'; exit 1 }
 
 $binDir = Split-Path -Parent $mainExe.FullName
 Write-DebugLog "Binary directory: $binDir"
+Write-Host "WorkTimer Installer"
+Write-Host "Quelle : $binDir"
+Write-Host "Ziel   : $Dest"
+Write-Host ''
 
 # --- Copy the entire onedir bundle ----------------------------------------
 # /IS + /IT  : always overwrite existing files (same size, tweaked timestamps)
@@ -88,6 +92,7 @@ $robocopyArgs = @($binDir, $Dest, '/E', '/IS', '/IT') +
 # Use Start-Process with file redirects to avoid the PowerShell pipeline deadlock.
 # Both "| Out-Null" and "*> $null" still route through the PS pipeline buffer,
 # which deadlocks when robocopy emits large output on reinstall.
+Write-Host 'Kopiere Programmdateien...' -NoNewline
 $tmpOut = [System.IO.Path]::GetTempFileName()
 $tmpErr = [System.IO.Path]::GetTempFileName()
 $proc = Start-Process -FilePath 'robocopy' -ArgumentList $robocopyArgs `
@@ -98,24 +103,34 @@ Remove-Item $tmpOut, $tmpErr -ErrorAction SilentlyContinue
 Write-DebugLog "robocopy exit code: $robocopyExit"
 if ($robocopyExit -ge 8) {
     # robocopy exit codes 0-7 are success; 8+ are errors
+    Write-Host ' (Fallback)'
     Write-Warning "robocopy reported errors (code $robocopyExit). Falling back to Copy-Item."
     # Copy everything except protected user-data files/dirs
     $protectedExact = @('arbeitszeiten.csv', 'config.json', 'checkin_state.json')
-    Get-ChildItem -Path $binDir -Recurse | Where-Object {
+    $allItems = Get-ChildItem -Path $binDir -Recurse
+    $total = $allItems.Count
+    $i = 0
+    $allItems | Where-Object {
         if ($_.PSIsContainer) { return $_.Name -notin $protectedDirs }
         if ($_.Name -in $protectedExact) { return $false }
         if ($_.Name -like 'feiertage*.csv') { return $false }
         if ($_.Name -like 'holidays*.csv') { return $false }
         return $true
     } | ForEach-Object {
+        $i++
+        if ($i % 50 -eq 0) { Write-Host "." -NoNewline }
         $rel      = $_.FullName.Substring($binDir.Length).TrimStart('\','/')
         $destFile = Join-Path $Dest $rel
         $dir      = Split-Path $destFile -Parent
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
         if (-not $_.PSIsContainer) { Copy-Item -Path $_.FullName -Destination $destFile -Force }
     }
+    Write-Host ' fertig.'
+} else {
+    Write-Host ' fertig.'
 }
 
+Write-Host 'Kopiere Icons...' -NoNewline
 # --- Remove existing shortcuts before copying icons -----------------------
 # Explorer holds .ico files open as long as a shortcut that references them
 # exists. Removing the shortcuts first releases the lock so Copy-Item succeeds.
@@ -133,6 +148,7 @@ foreach ($ico in @('Kommen.ico', 'Gehen.ico', 'WorkTimer.ico')) {
     $found = Get-ChildItem -Path $Source -Filter $ico -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($found) { Copy-FileRetry -SrcPath $found.FullName -DestDir $Dest }
 }
+Write-Host ' fertig.'
 
 Write-DebugLog "Files copied to $Dest"
 
@@ -141,7 +157,8 @@ $quickExePath = Join-Path $Dest 'work_timer_quick.exe'
 # Fall back to main exe if quick exe not present (e.g. older build)
 if (-not (Test-Path $quickExePath)) { $quickExePath = $exePath }
 
-# --- Create shortcuts ------------------------------------------------------
+# --- Create shortcuts -----------------------------------------------------------
+Write-Host 'Erstelle Verknüpfungen...' -NoNewline
 if (-not $SkipShortcuts) {
     try {
         $w = New-Object -ComObject WScript.Shell
@@ -168,10 +185,11 @@ if (-not $SkipShortcuts) {
         $s.IconLocation    = (Join-Path $Dest 'WorkTimer.ico') + ',0'
         $s.WorkingDirectory = $Dest
         $s.Save()
+        Write-Host ' fertig.'
     } catch {
         Write-DebugLog ("Shortcut creation failed: {0}" -f $_)
+        Write-Host ' (Fehler)'
     }
 }
-
-Write-Host "Installation finished.`nFiles copied to: $Dest"
-if ($SkipShortcuts) { Write-Host 'Desktop shortcuts creation: SKIPPED' } else { Write-Host 'Desktop shortcuts created: Kommen, Gehen, WorkTimer' }
+Write-Host ''
+Write-Host 'Installation abgeschlossen.'
