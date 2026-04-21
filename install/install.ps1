@@ -85,13 +85,20 @@ $robocopyArgs = @($binDir, $Dest, '/E', '/IS', '/IT') +
                 @('/XF') + $protectedFiles +
                 @('/XD') + $protectedDirs +
                 @('/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
-# *> $null redirects all streams natively, avoiding the pipeline deadlock that
-# "| Out-Null" causes when robocopy emits large output during reinstalls.
-& robocopy @robocopyArgs *> $null
-Write-DebugLog "robocopy exit code: $LASTEXITCODE"
-if ($LASTEXITCODE -ge 8) {
+# Use Start-Process with file redirects to avoid the PowerShell pipeline deadlock.
+# Both "| Out-Null" and "*> $null" still route through the PS pipeline buffer,
+# which deadlocks when robocopy emits large output on reinstall.
+$tmpOut = [System.IO.Path]::GetTempFileName()
+$tmpErr = [System.IO.Path]::GetTempFileName()
+$proc = Start-Process -FilePath 'robocopy' -ArgumentList $robocopyArgs `
+    -Wait -NoNewWindow -PassThru `
+    -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
+$robocopyExit = $proc.ExitCode
+Remove-Item $tmpOut, $tmpErr -ErrorAction SilentlyContinue
+Write-DebugLog "robocopy exit code: $robocopyExit"
+if ($robocopyExit -ge 8) {
     # robocopy exit codes 0-7 are success; 8+ are errors
-    Write-Warning "robocopy reported errors (code $LASTEXITCODE). Falling back to Copy-Item."
+    Write-Warning "robocopy reported errors (code $robocopyExit). Falling back to Copy-Item."
     # Copy everything except protected user-data files/dirs
     $protectedExact = @('arbeitszeiten.csv', 'config.json', 'checkin_state.json')
     Get-ChildItem -Path $binDir -Recurse | Where-Object {
