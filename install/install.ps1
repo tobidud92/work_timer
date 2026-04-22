@@ -84,8 +84,21 @@ Get-ChildItem -Path $Dest -Directory -ErrorAction SilentlyContinue | Where-Objec
 } | ForEach-Object {
     Write-Host "Bereinige veraltetes Verzeichnis: $($_.Name)"
     Write-DebugLog "Removing stale dir: $($_.FullName)"
-    # Use cmd to handle MAX_PATH paths that PowerShell can't remove directly
-    & cmd /c "rmdir /s /q `"$($_.FullName)`"" 2>$null
+    # Use cmd to handle MAX_PATH paths that PowerShell can't remove directly.
+    # CreateNoWindow + redirected stdio: no window, no PTY pollution.
+    $psiRm = New-Object System.Diagnostics.ProcessStartInfo
+    $psiRm.FileName               = 'cmd.exe'
+    $psiRm.Arguments              = "/c rmdir /s /q `"$($_.FullName)`""
+    $psiRm.CreateNoWindow         = $true
+    $psiRm.UseShellExecute        = $false
+    $psiRm.RedirectStandardOutput = $true
+    $psiRm.RedirectStandardError  = $true
+    $procRm = [System.Diagnostics.Process]::Start($psiRm)
+    # Drain streams asynchronously to prevent PTY saturation and deadlock.
+    $outRm = $procRm.StandardOutput.ReadToEndAsync()
+    $errRm = $procRm.StandardError.ReadToEndAsync()
+    $procRm.WaitForExit()
+    $outRm.Wait(); $errRm.Wait()
 }
 
 # --- Copy the entire onedir bundle ----------------------------------------
@@ -104,12 +117,23 @@ $robocopyArgs = @($binDir, $Dest, '/E', '/IS', '/IT') +
                 @('/XF') + $protectedFiles +
                 @('/XD') + $protectedDirs +
                 @('/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
-# Use -WindowStyle Hidden so robocopy output goes nowhere (hidden window, no
-# pipeline buffer). Avoids both the "| Out-Null" deadlock and the
-# Start-Process -NoNewWindow -RedirectStd* deadlock seen on some Windows versions.
+# CreateNoWindow + redirected stdio: no window, no PTY pollution.
+# Both streams are drained asynchronously before WaitForExit to prevent
+# the classic sequential-ReadToEnd deadlock when both kernel buffers fill.
 Write-Host 'Kopiere Programmdateien...' -NoNewline
-$proc = Start-Process -FilePath 'robocopy' -ArgumentList $robocopyArgs `
-    -Wait -WindowStyle Hidden -PassThru
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName               = 'robocopy'
+$psi.Arguments              = $robocopyArgs -join ' '
+$psi.CreateNoWindow         = $true
+$psi.UseShellExecute        = $false
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError  = $true
+$proc = [System.Diagnostics.Process]::Start($psi)
+# Drain both streams concurrently so neither kernel buffer ever fills.
+$outTask = $proc.StandardOutput.ReadToEndAsync()
+$errTask = $proc.StandardError.ReadToEndAsync()
+$proc.WaitForExit()
+$outTask.Wait(); $errTask.Wait()
 $robocopyExit = $proc.ExitCode
 Write-DebugLog "robocopy exit code: $robocopyExit"
 if ($robocopyExit -ge 8) {
