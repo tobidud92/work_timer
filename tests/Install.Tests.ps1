@@ -1,4 +1,4 @@
-# Pester tests for install/install.ps1
+﻿# Pester tests for install/install.ps1
 # Run from repo root:  Invoke-Pester tests\Install.Tests.ps1 -Output Detailed
 #
 # Every test uses an isolated temp directory tree; the real desktop is never
@@ -6,6 +6,47 @@
 
 $repoRoot  = Split-Path -Parent $PSScriptRoot
 $installer = Join-Path $repoRoot 'install\install.ps1'
+
+# ---------------------------------------------------------------------------
+# Helper: run install.ps1 in an isolated Runspace with a hard timeout.
+# Throws "DEADLOCK DETECTED" if the script does not finish within $TimeoutMs.
+# Using a Runspace (not Start-Job) keeps overhead to ~50 ms per call and avoids
+# spawning an extra PowerShell process for every single test.
+# ---------------------------------------------------------------------------
+function Invoke-InstallerWithTimeout {
+    param(
+        [string]$Ps1,
+        [string]$Source,
+        [string]$Dest,
+        [switch]$SkipShortcuts,
+        [int]$TimeoutMs = 30000
+    )
+    $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+    $rs.Open()
+    $rs.SessionStateProxy.SetVariable('Ps1',          $Ps1)
+    $rs.SessionStateProxy.SetVariable('Source',       $Source)
+    $rs.SessionStateProxy.SetVariable('Dest',         $Dest)
+    $rs.SessionStateProxy.SetVariable('SkipShortcuts',$SkipShortcuts.IsPresent)
+
+    $ps = [powershell]::Create()
+    $ps.Runspace = $rs
+    if ($SkipShortcuts) {
+        [void]$ps.AddScript('& $Ps1 -Source $Source -Dest $Dest -SkipShortcuts')
+    } else {
+        [void]$ps.AddScript('& $Ps1 -Source $Source -Dest $Dest')
+    }
+
+    $handle = $ps.BeginInvoke()
+    $finished = $handle.AsyncWaitHandle.WaitOne($TimeoutMs)
+    if (-not $finished) {
+        $ps.Stop()
+        $ps.Dispose(); $rs.Dispose()
+        throw "DEADLOCK DETECTED: installer '$Ps1' did not complete within $($TimeoutMs/1000)s"
+    }
+    $ps.EndInvoke($handle) | Out-Null
+    if ($ps.HadErrors) { throw $ps.Streams.Error[0] }
+    $ps.Dispose(); $rs.Dispose()
+}
 
 # ---------------------------------------------------------------------------
 # Helper: build a minimal source tree that the installer accepts.
@@ -50,41 +91,42 @@ Describe 'install.ps1 – fresh install' {
     }
 
     It 'creates the destination directory when it does not exist' {
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
         Test-Path $script:dest | Should Be $true
     }
 
     It 'copies work_timer.exe to Dest' {
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
         Test-Path (Join-Path $script:dest 'work_timer.exe') | Should Be $true
     }
 
     It 'copies all three icons to Dest' {
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
         foreach ($ico in @('Kommen.ico','Gehen.ico','WorkTimer.ico')) {
             Test-Path (Join-Path $script:dest $ico) | Should Be $true
         }
     }
 
     It 'copies _internal sub-directory contents to Dest' {
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
         Test-Path (Join-Path $script:dest '_internal\dummy.dll') | Should Be $true
     }
 
     It 'does not create legacy .bat or .vbs wrappers' {
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
         foreach ($f in @('kommen.bat','gehen.bat','kommen.vbs','gehen.vbs')) {
             Test-Path (Join-Path $script:dest $f) | Should Be $false
         }
     }
 
     It 'exits with code 1 when work_timer.exe is absent from Source' {
-        # Remove the exe so the installer cannot locate the binary dir
+        # Remove the exe so the installer cannot locate the binary dir.
+        # This is a fast-fail path (< 1 s, no blocking I/O), so we call the
+        # installer directly to preserve $LASTEXITCODE in this scope.
         Remove-Item (Join-Path $script:src 'work_timer.exe') -Force
         try {
             & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
         } catch { }
-        # Installer calls Write-Error + exit 1 — last exit code propagated
         $LASTEXITCODE | Should Be 1
     }
 }
@@ -114,7 +156,7 @@ Describe 'install.ps1 – reinstall (files already present in Dest)' {
         # Write distinguishable content into the source exe
         'new content' | Out-File -FilePath (Join-Path $script:src 'work_timer.exe')
 
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
 
         $content = Get-Content (Join-Path $script:dest 'work_timer.exe') -Raw
         $content | Should Match 'new content'
@@ -124,7 +166,7 @@ Describe 'install.ps1 – reinstall (files already present in Dest)' {
         $csvPath = Join-Path $script:dest 'arbeitszeiten.csv'
         'user data row 1' | Out-File -FilePath $csvPath
 
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
 
         Test-Path $csvPath | Should Be $true
         $content = Get-Content $csvPath -Raw
@@ -135,7 +177,7 @@ Describe 'install.ps1 – reinstall (files already present in Dest)' {
         $cfgPath = Join-Path $script:dest 'config.json'
         '{"soll":8}' | Out-File -FilePath $cfgPath
 
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
 
         Test-Path $cfgPath | Should Be $true
         (Get-Content $cfgPath -Raw) | Should Match '"soll":8'
@@ -145,7 +187,7 @@ Describe 'install.ps1 – reinstall (files already present in Dest)' {
         $statePath = Join-Path $script:dest 'checkin_state.json'
         '{"start":"08:00"}' | Out-File -FilePath $statePath
 
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
 
         (Get-Content $statePath -Raw) | Should Match '"start":"08:00"'
     }
@@ -154,7 +196,7 @@ Describe 'install.ps1 – reinstall (files already present in Dest)' {
         $holiday = Join-Path $script:dest 'feiertage_2025.csv'
         'holiday,date' | Out-File -FilePath $holiday
 
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
 
         (Get-Content $holiday -Raw) | Should Match 'holiday,date'
     }
@@ -163,7 +205,7 @@ Describe 'install.ps1 – reinstall (files already present in Dest)' {
         $holiday = Join-Path $script:dest 'holidays_custom.csv'
         'holiday,date' | Out-File -FilePath $holiday
 
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
 
         (Get-Content $holiday -Raw) | Should Match 'holiday,date'
     }
@@ -173,7 +215,7 @@ Describe 'install.ps1 – reinstall (files already present in Dest)' {
         New-Item -ItemType Directory -Path $reportsDir -Force | Out-Null
         'report pdf stub' | Out-File -FilePath (Join-Path $reportsDir 'report_2025.pdf')
 
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
 
         Test-Path (Join-Path $reportsDir 'report_2025.pdf') | Should Be $true
     }
@@ -200,7 +242,7 @@ Describe 'install.ps1 – stale directory cleanup' {
         $stale = New-Item -ItemType Directory -Path (Join-Path $script:dest 'work_timer.exe') -Force
         'some file' | Out-File -FilePath (Join-Path $stale.FullName 'nested.txt')
 
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
 
         # Stale DIRECTORY must be gone. robocopy will copy the real work_timer.exe
         # FILE to the same path, so Test-Path may still return $true.
@@ -217,7 +259,7 @@ Describe 'install.ps1 – stale directory cleanup' {
         $stale = New-Item -ItemType Directory -Path (Join-Path $script:dest 'work_timer_quick.exe') -Force
         'junk' | Out-File (Join-Path $stale.FullName 'junk.txt')
 
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
 
         Test-Path $stale.FullName | Should Be $false
     }
@@ -226,7 +268,7 @@ Describe 'install.ps1 – stale directory cleanup' {
         $internal = New-Item -ItemType Directory -Path (Join-Path $script:dest '_internal') -Force
         'keep me' | Out-File (Join-Path $internal.FullName 'existing.dll')
 
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
 
         # _internal should still be there (not wiped), and overwritten by robocopy
         Test-Path $internal.FullName | Should Be $true
@@ -236,7 +278,7 @@ Describe 'install.ps1 – stale directory cleanup' {
         $reports = New-Item -ItemType Directory -Path (Join-Path $script:dest 'reports') -Force
         'report' | Out-File (Join-Path $reports.FullName 'report.pdf')
 
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
 
         Test-Path (Join-Path $reports.FullName 'report.pdf') | Should Be $true
     }
@@ -265,7 +307,7 @@ Describe 'install.ps1 – shortcuts (-SkipShortcuts OFF)' {
     It 'creates Kommen.lnk, Gehen.lnk, and WorkTimer.lnk on the Desktop' {
         $desktop = [Environment]::GetFolderPath('Desktop')
 
-        & $installer -Source $script:src -Dest $script:dest
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest
 
         foreach ($lnk in @('Kommen.lnk','Gehen.lnk','WorkTimer.lnk')) {
             $path = Join-Path $desktop $lnk
@@ -276,7 +318,7 @@ Describe 'install.ps1 – shortcuts (-SkipShortcuts OFF)' {
 
     It 'Kommen.lnk target is work_timer_quick.exe with --start-now argument' {
         $desktop = [Environment]::GetFolderPath('Desktop')
-        & $installer -Source $script:src -Dest $script:dest
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest
 
         $lnkPath = Join-Path $desktop 'Kommen.lnk'
         $script:lnksCreated += $lnkPath
@@ -289,7 +331,7 @@ Describe 'install.ps1 – shortcuts (-SkipShortcuts OFF)' {
 
     It 'Gehen.lnk target is work_timer_quick.exe with --end-now argument' {
         $desktop = [Environment]::GetFolderPath('Desktop')
-        & $installer -Source $script:src -Dest $script:dest
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest
 
         $lnkPath = Join-Path $desktop 'Gehen.lnk'
         $script:lnksCreated += $lnkPath
@@ -319,17 +361,17 @@ Describe 'install.ps1 – paths containing spaces' {
     }
 
     It 'copies work_timer.exe when source path contains spaces' {
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
         Test-Path (Join-Path $script:dest 'work_timer.exe') | Should Be $true
     }
 
     It 'copies _internal dir when both source and dest paths contain spaces' {
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
         Test-Path (Join-Path $script:dest '_internal\dummy.dll') | Should Be $true
     }
 
     It 'copies all three icons when paths contain spaces' {
-        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts
         foreach ($ico in @('Kommen.ico','Gehen.ico','WorkTimer.ico')) {
             Test-Path (Join-Path $script:dest $ico) | Should Be $true
         }

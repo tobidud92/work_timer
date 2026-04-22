@@ -58,11 +58,28 @@ if (-not (Test-Path $Dest)) {
 }
 
 # --- Find the onedir bundle (directory containing work_timer.exe) ---------
-# Build output is dist/work_timer/ - search Source and common parent locations.
-$mainExe = Get-ChildItem -Path $Source -Filter 'work_timer.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $mainExe) {
-    $parent = Split-Path -Path $Source -Parent
-    if ($parent) { $mainExe = Get-ChildItem -Path $parent -Filter 'work_timer.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 }
+# Check the canonical package layout first ($Source\work_timer\work_timer.exe).
+# Falling back to a recursive search is necessary for dev/build layouts, but we
+# MUST NOT recurse into $Dest: after a reinstall $Dest (which may live inside
+# $Source) also contains work_timer.exe, and picking that path would make
+# robocopy copy a directory onto itself, causing it to hang indefinitely.
+$canonicalExe = Join-Path $Source 'work_timer\work_timer.exe'
+if (Test-Path $canonicalExe) {
+    $mainExe = Get-Item $canonicalExe
+} else {
+    # Exclude $Dest from the recursive search so a previously-installed copy
+    # inside $Source does not shadow the real bundle.
+    $mainExe = Get-ChildItem -Path $Source -Filter 'work_timer.exe' -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { -not $Dest -or -not $_.FullName.StartsWith($Dest, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Select-Object -First 1
+    if (-not $mainExe) {
+        $parent = Split-Path -Path $Source -Parent
+        if ($parent) {
+            $mainExe = Get-ChildItem -Path $parent -Filter 'work_timer.exe' -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { -not $Dest -or -not $_.FullName.StartsWith($Dest, [System.StringComparison]::OrdinalIgnoreCase) } |
+                Select-Object -First 1
+        }
+    }
 }
 if (-not $mainExe) { Write-Error 'work_timer.exe not found'; exit 1 }
 
@@ -85,22 +102,16 @@ Get-ChildItem -Path $Dest -Directory -ErrorAction SilentlyContinue | Where-Objec
     Write-Host "Bereinige veraltetes Verzeichnis: $($_.Name)"
     Write-DebugLog "Removing stale dir: $($_.FullName)"
     # Use cmd to handle MAX_PATH paths that PowerShell can't remove directly.
-    # CreateNoWindow + redirected stdio: no window, no PTY pollution.
-    # BeginOutputReadLine/BeginErrorReadLine drain pipes on the .NET I/O thread
-    # pool — the only pattern that cannot deadlock regardless of output volume.
-    $psiRm = New-Object System.Diagnostics.ProcessStartInfo
-    $psiRm.FileName               = 'cmd.exe'
-    $psiRm.Arguments              = "/c rmdir /s /q `"$($_.FullName)`""
-    $psiRm.CreateNoWindow         = $true
-    $psiRm.UseShellExecute        = $false
-    $psiRm.RedirectStandardOutput = $true
-    $psiRm.RedirectStandardError  = $true
-    $procRm = New-Object System.Diagnostics.Process
-    $procRm.StartInfo = $psiRm
-    $procRm.Start() | Out-Null
-    $procRm.BeginOutputReadLine()
-    $procRm.BeginErrorReadLine()
-    $procRm.WaitForExit()
+    # Redirect output to temp files: no pipe buffer, no PTY inheritance, no deadlock.
+    $rmOut = [System.IO.Path]::GetTempFileName()
+    $rmErr = [System.IO.Path]::GetTempFileName()
+    Start-Process -FilePath 'cmd.exe' `
+        -ArgumentList "/c rmdir /s /q `"$($_.FullName)`"" `
+        -NoNewWindow `
+        -RedirectStandardOutput $rmOut `
+        -RedirectStandardError  $rmErr `
+        -Wait
+    Remove-Item $rmOut, $rmErr -Force -ErrorAction SilentlyContinue
 }
 
 # --- Copy the entire onedir bundle ----------------------------------------
@@ -121,24 +132,20 @@ $robocopyArgs = @("`"$binDir`"", "`"$Dest`"", '/E', '/IS', '/IT') +
                 @('/XF') + $protectedFiles +
                 @('/XD') + $protectedDirs +
                 @('/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
-# CreateNoWindow + redirected stdio: no window, no PTY pollution.
-# BeginOutputReadLine/BeginErrorReadLine drain pipes on the .NET I/O thread
-# pool — the only pattern that cannot deadlock regardless of output volume.
+# Redirect robocopy output to temp files: no pipe buffer, no PTY inheritance,
+# no deadlock possible regardless of output volume. -NoNewWindow prevents a
+# new console window opening.
 Write-Host 'Kopiere Programmdateien...' -NoNewline
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName               = 'robocopy'
-$psi.Arguments              = $robocopyArgs -join ' '
-$psi.CreateNoWindow         = $true
-$psi.UseShellExecute        = $false
-$psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError  = $true
-$proc = New-Object System.Diagnostics.Process
-$proc.StartInfo = $psi
-$proc.Start() | Out-Null
-$proc.BeginOutputReadLine()
-$proc.BeginErrorReadLine()
-$proc.WaitForExit()
+$robocopyOut = [System.IO.Path]::GetTempFileName()
+$robocopyErr = [System.IO.Path]::GetTempFileName()
+$proc = Start-Process -FilePath 'robocopy' `
+    -ArgumentList ($robocopyArgs -join ' ') `
+    -NoNewWindow `
+    -RedirectStandardOutput $robocopyOut `
+    -RedirectStandardError  $robocopyErr `
+    -Wait -PassThru
 $robocopyExit = $proc.ExitCode
+Remove-Item $robocopyOut, $robocopyErr -Force -ErrorAction SilentlyContinue
 Write-DebugLog "robocopy exit code: $robocopyExit"
 if ($robocopyExit -ge 8) {
     # robocopy exit codes 0-7 are success; 8+ are errors
