@@ -112,6 +112,11 @@ Describe "install.bat – content validation (catches missing -Source regression
         $content = Get-Content $realBat -Raw
         $content | Should Match 'Unblock-File'
     }
+
+    It "sets console codepage to UTF-8 (chcp 65001) so umlauts display correctly" {
+        $content = Get-Content $realBat -Raw
+        $content | Should Match 'chcp\s+65001'
+    }
 }
 
 # ---------------------------------------------------------------------------

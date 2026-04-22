@@ -128,7 +128,7 @@ $protectedFiles = @('arbeitszeiten.csv', 'config.json', 'checkin_state.json', 'f
 $protectedDirs  = @('reports')
 # Paths must be quoted in case they contain spaces.
 # Flags and wildcard exclusions do not need quoting.
-$robocopyArgs = @("`"$binDir`"", "`"$Dest`"", '/E', '/IS', '/IT') +
+$robocopyArgs = @("`"$binDir`"", "`"$Dest`"", '/E') +
                 @('/XF') + $protectedFiles +
                 @('/XD') + $protectedDirs +
                 @('/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
