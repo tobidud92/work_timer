@@ -113,7 +113,9 @@ Get-ChildItem -Path $Dest -Directory -ErrorAction SilentlyContinue | Where-Objec
 #   reports/            - generated PDF reports
 $protectedFiles = @('arbeitszeiten.csv', 'config.json', 'checkin_state.json', 'feiertage*.csv', 'holidays*.csv')
 $protectedDirs  = @('reports')
-$robocopyArgs = @($binDir, $Dest, '/E', '/IS', '/IT') +
+# Paths must be quoted in case they contain spaces.
+# Flags and wildcard exclusions do not need quoting.
+$robocopyArgs = @("`"$binDir`"", "`"$Dest`"", '/E', '/IS', '/IT') +
                 @('/XF') + $protectedFiles +
                 @('/XD') + $protectedDirs +
                 @('/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')

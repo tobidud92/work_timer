@@ -300,3 +300,38 @@ Describe 'install.ps1 – shortcuts (-SkipShortcuts OFF)' {
         $lnk.Arguments  | Should Be '--end-now'
     }
 }
+
+# ---------------------------------------------------------------------------
+Describe 'install.ps1 – paths containing spaces' {
+    # Regression test: robocopy arguments must quote $binDir and $Dest.
+    # Without quotes, a path like "C:\my folder\source" is split by robocopy
+    # into two tokens and the copy fails (or silently falls back to Copy-Item).
+
+    BeforeEach {
+        $script:root = Join-Path ([System.IO.Path]::GetTempPath()) "wt pester spaces $([System.IO.Path]::GetRandomFileName())"
+        $script:src  = Join-Path $script:root 'source folder'
+        $script:dest = Join-Path $script:root 'dest folder'
+        New-SourceTree -Path $script:src -WithInternalDir
+    }
+
+    AfterEach {
+        Remove-Item $script:root -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'copies work_timer.exe when source path contains spaces' {
+        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Test-Path (Join-Path $script:dest 'work_timer.exe') | Should Be $true
+    }
+
+    It 'copies _internal dir when both source and dest paths contain spaces' {
+        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        Test-Path (Join-Path $script:dest '_internal\dummy.dll') | Should Be $true
+    }
+
+    It 'copies all three icons when paths contain spaces' {
+        & $installer -Source $script:src -Dest $script:dest -SkipShortcuts
+        foreach ($ico in @('Kommen.ico','Gehen.ico','WorkTimer.ico')) {
+            Test-Path (Join-Path $script:dest $ico) | Should Be $true
+        }
+    }
+}
