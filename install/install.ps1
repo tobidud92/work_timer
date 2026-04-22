@@ -86,6 +86,8 @@ Get-ChildItem -Path $Dest -Directory -ErrorAction SilentlyContinue | Where-Objec
     Write-DebugLog "Removing stale dir: $($_.FullName)"
     # Use cmd to handle MAX_PATH paths that PowerShell can't remove directly.
     # CreateNoWindow + redirected stdio: no window, no PTY pollution.
+    # BeginOutputReadLine/BeginErrorReadLine drain pipes on the .NET I/O thread
+    # pool — the only pattern that cannot deadlock regardless of output volume.
     $psiRm = New-Object System.Diagnostics.ProcessStartInfo
     $psiRm.FileName               = 'cmd.exe'
     $psiRm.Arguments              = "/c rmdir /s /q `"$($_.FullName)`""
@@ -93,12 +95,12 @@ Get-ChildItem -Path $Dest -Directory -ErrorAction SilentlyContinue | Where-Objec
     $psiRm.UseShellExecute        = $false
     $psiRm.RedirectStandardOutput = $true
     $psiRm.RedirectStandardError  = $true
-    $procRm = [System.Diagnostics.Process]::Start($psiRm)
-    # Drain streams asynchronously to prevent PTY saturation and deadlock.
-    $outRm = $procRm.StandardOutput.ReadToEndAsync()
-    $errRm = $procRm.StandardError.ReadToEndAsync()
+    $procRm = New-Object System.Diagnostics.Process
+    $procRm.StartInfo = $psiRm
+    $procRm.Start() | Out-Null
+    $procRm.BeginOutputReadLine()
+    $procRm.BeginErrorReadLine()
     $procRm.WaitForExit()
-    $outRm.Wait(); $errRm.Wait()
 }
 
 # --- Copy the entire onedir bundle ----------------------------------------
@@ -120,8 +122,8 @@ $robocopyArgs = @("`"$binDir`"", "`"$Dest`"", '/E', '/IS', '/IT') +
                 @('/XD') + $protectedDirs +
                 @('/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
 # CreateNoWindow + redirected stdio: no window, no PTY pollution.
-# Both streams are drained asynchronously before WaitForExit to prevent
-# the classic sequential-ReadToEnd deadlock when both kernel buffers fill.
+# BeginOutputReadLine/BeginErrorReadLine drain pipes on the .NET I/O thread
+# pool — the only pattern that cannot deadlock regardless of output volume.
 Write-Host 'Kopiere Programmdateien...' -NoNewline
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName               = 'robocopy'
@@ -130,12 +132,12 @@ $psi.CreateNoWindow         = $true
 $psi.UseShellExecute        = $false
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError  = $true
-$proc = [System.Diagnostics.Process]::Start($psi)
-# Drain both streams concurrently so neither kernel buffer ever fills.
-$outTask = $proc.StandardOutput.ReadToEndAsync()
-$errTask = $proc.StandardError.ReadToEndAsync()
+$proc = New-Object System.Diagnostics.Process
+$proc.StartInfo = $psi
+$proc.Start() | Out-Null
+$proc.BeginOutputReadLine()
+$proc.BeginErrorReadLine()
 $proc.WaitForExit()
-$outTask.Wait(); $errTask.Wait()
 $robocopyExit = $proc.ExitCode
 Write-DebugLog "robocopy exit code: $robocopyExit"
 if ($robocopyExit -ge 8) {
