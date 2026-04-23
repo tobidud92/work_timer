@@ -1,9 +1,16 @@
-param(
+﻿param(
     [string]$Source = (Get-Location).Path,
     [string]$Dest = $null,
     [switch]$SkipShortcuts,
     [switch]$Debug
 )
+
+# Ensure UTF-8 output regardless of the console codepage that was active when
+# this process started.  cmd.exe defaults to CP850 on German Windows; chcp 65001
+# in install.bat switches the *terminal* to UTF-8, but PowerShell's
+# [Console]::OutputEncoding is captured at process start before chcp runs.
+# Setting it here guarantees Write-Host emits UTF-8 bytes for every umlaut.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 function Write-DebugLog {
     param($msg)

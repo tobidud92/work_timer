@@ -117,6 +117,54 @@ Describe "install.bat – content validation (catches missing -Source regression
         $content = Get-Content $realBat -Raw
         $content | Should Match 'chcp\s+65001'
     }
+
+    It "install.ps1 sets [Console]::OutputEncoding to UTF-8 at startup" {
+        $content = Get-Content $realPs1 -Raw
+        $content | Should Match '\[Console\]::OutputEncoding'
+        $content | Should Match 'UTF8'
+    }
+}
+
+# ---------------------------------------------------------------------------
+Describe 'install.ps1 – umlaut output survives cmd.exe -> powershell.exe pipeline' {
+    # This test replicates exactly what install.bat does: spawn powershell.exe
+    # as a child of the current process with no explicit encoding flag, capture
+    # its stdout as raw bytes decoded with UTF-8, and assert that the German
+    # status lines containing umlauts (ü, ü) are intact.
+    # If [Console]::OutputEncoding is not forced to UTF-8 in install.ps1, this
+    # test will fail with garbled characters like 'VerknA¼pfungen'.
+
+    BeforeEach {
+        $script:pkg  = Join-Path ([System.IO.Path]::GetTempPath()) "wt_umlaut_$([System.IO.Path]::GetRandomFileName())"
+        New-InstallPackage -Path $script:pkg
+        $script:ps1  = Join-Path $script:pkg 'install.ps1'
+        $script:dest = Join-Path $script:pkg 'dest'
+    }
+
+    AfterEach {
+        Remove-Item $script:pkg -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'status lines containing umlauts are not garbled when invoked as a subprocess' {
+        # Spawn powershell.exe the same way cmd.exe would: as a plain child
+        # process with stdout piped back.  Decode the pipe as UTF-8.
+        $psi = [System.Diagnostics.ProcessStartInfo]::new('powershell.exe')
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$($script:ps1)`" -Source `"$($script:pkg)`" -Dest `"$($script:dest)`" -SkipShortcuts"
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError  = $true
+        $psi.UseShellExecute        = $false
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        # Read raw bytes directly into a MemoryStream (avoiding any default-encoding
+        # StreamReader that might be peeking/buffering the pipe before we can wrap it).
+        # Then decode with UTF-8 ourselves.
+        $ms = [System.IO.MemoryStream]::new()
+        $proc.StandardOutput.BaseStream.CopyTo($ms)
+        $proc.WaitForExit(30000) | Out-Null
+        $stdout = [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
+
+        # The line 'Erstelle Verknuepfungen... fertig.' must contain the real ue glyph.
+        $stdout | Should Match ([char]0xFC)   # u-umlaut (ü)
+    }
 }
 
 # ---------------------------------------------------------------------------
