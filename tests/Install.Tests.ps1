@@ -448,6 +448,13 @@ Describe 'install.ps1 – resilience against locked .ico files' {
     }
 
     AfterEach {
+        # Release the permanent lock if the third test created one.
+        if ($script:permLockPs) {
+            try { $script:permLockPs.Stop() } catch { }
+            try { $script:permLockPs.Dispose() } catch { }
+            try { $script:permLockRs.Dispose() } catch { }
+            $script:permLockPs = $null; $script:permLockRs = $null; $script:permLockAsync = $null
+        }
         Remove-Item $script:root -Recurse -Force -ErrorAction SilentlyContinue
     }
 
@@ -531,5 +538,39 @@ Describe 'install.ps1 – resilience against locked .ico files' {
         # — which is only possible if shortcuts were deleted first (releasing
         # Explorer handles) before the file copy to dest began.
         [System.IO.File]::ReadAllText($destIco) | Should Be 'NEW_CONTENT'
+    }
+
+    It 'terminates within 60 s even when an .ico file is permanently locked' {
+        # Regression guard for the original hang: a permanently locked .ico must
+        # NOT cause the installer to run indefinitely.
+        # With /R:10 /W:1 robocopy gives up after ~10 s per file and exits >=8,
+        # triggering the fallback path.  Total installer time must stay < 60 s.
+        $destIco = Join-Path $script:dest 'Gehen.ico'
+
+        # Hold the lock for longer than the test will take — released in AfterEach.
+        $rs = [runspacefactory]::CreateRunspace(); $rs.Open()
+        $rs.SessionStateProxy.SetVariable('icoPath', $destIco)
+        $ps = [powershell]::Create(); $ps.Runspace = $rs
+        $null = $ps.AddScript({
+            $fs = [System.IO.File]::Open($icoPath,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None)
+            Start-Sleep -Seconds 120   # hold for 2 min — far longer than the test
+            $fs.Dispose()
+        })
+        $script:permLockAsync = $ps.BeginInvoke()
+        $script:permLockPs    = $ps
+        $script:permLockRs    = $rs
+
+        Start-Sleep -Milliseconds 150   # ensure lock is held
+
+        $start = Get-Date
+        # This must NOT throw "DEADLOCK DETECTED" — installer must finish on its own.
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts -TimeoutMs 60000
+        $elapsed = (Get-Date) - $start
+
+        # Installer must have finished well within the 60 s budget.
+        $elapsed.TotalSeconds | Should BeLessThan 60
     }
 }

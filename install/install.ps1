@@ -25,6 +25,34 @@ function Write-DebugLog {
 
 Write-DebugLog "Installer started. Source=$Source"
 
+# Run an external process with a hard timeout.  If the process does not finish
+# within $TimeoutMs milliseconds it is killed and the function returns -1.
+# This prevents any subprocess from hanging the installer indefinitely.
+# (robocopy default /R:1000000 /W:30 would block for ~347 days without this.)
+function Start-ProcessWithTimeout {
+    param(
+        [string]$FilePath,
+        [string]$ArgumentList,
+        [string]$StdOut,
+        [string]$StdErr,
+        [int]$TimeoutMs = 120000   # 2 minutes default
+    )
+    $proc = Start-Process -FilePath $FilePath `
+        -ArgumentList $ArgumentList `
+        -NoNewWindow `
+        -RedirectStandardOutput $StdOut `
+        -RedirectStandardError  $StdErr `
+        -PassThru
+    $finished = $proc.WaitForExit($TimeoutMs)
+    if (-not $finished) {
+        Write-DebugLog ("Process '{0}' timed out after {1} ms — killing." -f $FilePath, $TimeoutMs)
+        try { $proc.Kill() } catch { }
+        $proc.WaitForExit(5000) | Out-Null   # brief grace period after kill
+        return -1
+    }
+    return $proc.ExitCode
+}
+
 # Copy a file to a destination folder, retrying on transient locks (e.g. Explorer holding .ico).
 # Uses [IO.File]::Copy instead of Copy-Item.
 # IMPORTANT: In PowerShell 5.1 calls to .NET methods throw MethodInvocationException
@@ -130,14 +158,13 @@ Get-ChildItem -Path $Dest -Directory -ErrorAction SilentlyContinue | Where-Objec
     Write-DebugLog "Removing stale dir: $($_.FullName)"
     # Use cmd to handle MAX_PATH paths that PowerShell can't remove directly.
     # Redirect output to temp files: no pipe buffer, no PTY inheritance, no deadlock.
+    # Timeout: 30 s — rmdir should never take longer; kill it if it does.
     $rmOut = [System.IO.Path]::GetTempFileName()
     $rmErr = [System.IO.Path]::GetTempFileName()
-    Start-Process -FilePath 'cmd.exe' `
+    $rmExit = Start-ProcessWithTimeout -FilePath 'cmd.exe' `
         -ArgumentList "/c rmdir /s /q `"$($_.FullName)`"" `
-        -NoNewWindow `
-        -RedirectStandardOutput $rmOut `
-        -RedirectStandardError  $rmErr `
-        -Wait
+        -StdOut $rmOut -StdErr $rmErr -TimeoutMs 30000
+    if ($rmExit -eq -1) { Write-Warning "rmdir timed out for: $($_.FullName)" }
     Remove-Item $rmOut, $rmErr -Force -ErrorAction SilentlyContinue
 }
 
@@ -189,17 +216,16 @@ $robocopyArgs = @("`"$binDir`"", "`"$Dest`"", '/E') +
 Write-Host 'Kopiere Programmdateien...' -NoNewline
 $robocopyOut = [System.IO.Path]::GetTempFileName()
 $robocopyErr = [System.IO.Path]::GetTempFileName()
-$proc = Start-Process -FilePath 'robocopy' `
+# Timeout: 5 minutes.  With /R:10 /W:1 each locked file costs at most 10 s;
+# a 5-minute ceiling ensures the installer always terminates, even if hundreds
+# of files are locked simultaneously (which would never happen in practice).
+$robocopyExit = Start-ProcessWithTimeout -FilePath 'robocopy' `
     -ArgumentList ($robocopyArgs -join ' ') `
-    -NoNewWindow `
-    -RedirectStandardOutput $robocopyOut `
-    -RedirectStandardError  $robocopyErr `
-    -Wait -PassThru
-$robocopyExit = $proc.ExitCode
+    -StdOut $robocopyOut -StdErr $robocopyErr -TimeoutMs 300000
 Remove-Item $robocopyOut, $robocopyErr -Force -ErrorAction SilentlyContinue
 Write-DebugLog "robocopy exit code: $robocopyExit"
-if ($robocopyExit -ge 8) {
-    # robocopy exit codes 0-7 are success; 8+ are errors
+if ($robocopyExit -eq -1 -or $robocopyExit -ge 8) {
+    # robocopy exit codes 0-7 are success; 8+ are errors; -1 means timed out (killed)
     Write-Host ' (Fallback)'
     Write-Warning "robocopy reported errors (code $robocopyExit). Falling back to Copy-Item."
     # Copy everything except protected user-data files/dirs
