@@ -26,16 +26,20 @@ function Write-DebugLog {
 Write-DebugLog "Installer started. Source=$Source"
 
 # Copy a file to a destination folder, retrying on transient locks (e.g. Explorer holding .ico).
+# Uses [IO.File]::Copy instead of Copy-Item: Copy-Item wraps IOException in a
+# CmdletInvocationException, which means 'catch [System.IO.IOException]' never fires.
+# [IO.File]::Copy throws IOException directly, so the typed catch works correctly.
 function Copy-FileRetry {
     param(
         [string]$SrcPath,
         [string]$DestDir,
-        [int]$Retries = 6,
-        [int]$DelayMs = 300
+        [int]$Retries = 10,
+        [int]$DelayMs = 500
     )
+    $destPath = Join-Path $DestDir (Split-Path $SrcPath -Leaf)
     for ($i = 0; $i -lt $Retries; $i++) {
         try {
-            Copy-Item -Path $SrcPath -Destination $DestDir -Force -ErrorAction Stop
+            [System.IO.File]::Copy($SrcPath, $destPath, $true)   # $true = overwrite
             return
         } catch [System.IO.IOException] {
             if ($i -lt ($Retries - 1)) {
