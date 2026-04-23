@@ -141,6 +141,28 @@ Get-ChildItem -Path $Dest -Directory -ErrorAction SilentlyContinue | Where-Objec
     Remove-Item $rmOut, $rmErr -Force -ErrorAction SilentlyContinue
 }
 
+# --- Remove existing shortcuts BEFORE any file copy ----------------------
+# Explorer holds .ico files open as long as a shortcut that references them
+# exists on the Desktop. We must delete shortcuts HERE — before robocopy —
+# so Explorer releases its .ico handles before we touch those files.
+# If we delete shortcuts only after robocopy, Explorer immediately re-opens
+# the freshly-written .ico files and the subsequent Copy-FileRetry hits a lock.
+$desktop = if ($DesktopOverride) { $DesktopOverride } else { [Environment]::GetFolderPath('Desktop') }
+if ($DesktopOverride -and -not (Test-Path $DesktopOverride)) {
+    New-Item -ItemType Directory -Path $DesktopOverride -Force | Out-Null
+}
+$removedShortcut = $false
+foreach ($lnk in @('Kommen.lnk', 'Gehen.lnk', 'WorkTimer.lnk')) {
+    $lnkPath = Join-Path $desktop $lnk
+    if (Test-Path $lnkPath) {
+        Remove-Item -Path $lnkPath -Force -ErrorAction SilentlyContinue
+        Write-DebugLog "Removed existing shortcut: $lnkPath"
+        $removedShortcut = $true
+    }
+}
+# Give Explorer time to release the .ico file handles after shortcut removal.
+if ($removedShortcut) { Start-Sleep -Milliseconds 1500 }
+
 # --- Copy the entire onedir bundle ----------------------------------------
 # /IS + /IT  : always overwrite existing files (same size, tweaked timestamps)
 # /XF        : never overwrite user data files
@@ -158,7 +180,9 @@ $protectedDirs  = @('reports')
 $robocopyArgs = @("`"$binDir`"", "`"$Dest`"", '/E') +
                 @('/XF') + $protectedFiles +
                 @('/XD') + $protectedDirs +
-                @('/MT:8', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
+                @('/MT:8', '/R:10', '/W:1', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
+# /R:10 /W:1 : retry each file up to 10 times with 1-second wait (total max 10s).
+#              robocopy default is R:1000000 W:30 which would hang for ~347 days.
 # Redirect robocopy output to temp files: no pipe buffer, no PTY inheritance,
 # no deadlock possible regardless of output volume. -NoNewWindow prevents a
 # new console window opening.
@@ -203,31 +227,22 @@ if ($robocopyExit -ge 8) {
     Write-Host ' fertig.'
 }
 
-# --- Remove existing shortcuts before copying icons -----------------------
-# Explorer holds .ico files open as long as a shortcut that references them
-# exists. Removing the shortcuts first releases the lock so Copy-Item succeeds.
-$desktop = if ($DesktopOverride) { $DesktopOverride } else { [Environment]::GetFolderPath('Desktop') }
-if ($DesktopOverride -and -not (Test-Path $DesktopOverride)) {
-    New-Item -ItemType Directory -Path $DesktopOverride -Force | Out-Null
-}
-$removedShortcut = $false
-foreach ($lnk in @('Kommen.lnk', 'Gehen.lnk', 'WorkTimer.lnk')) {
-    $lnkPath = Join-Path $desktop $lnk
-    if (Test-Path $lnkPath) {
-        Remove-Item -Path $lnkPath -Force -ErrorAction SilentlyContinue
-        Write-DebugLog "Removed existing shortcut: $lnkPath"
-        $removedShortcut = $true
-    }
-}
-# Give Explorer time to release the .ico file handles after shortcut removal
-if ($removedShortcut) { Start-Sleep -Milliseconds 1500 }
-
 Write-Host 'Kopiere Icons...' -NoNewline
 
-# --- Copy icons (stored next to install.ps1, not inside the bundle) -------
+# --- Copy icons not already handled by robocopy ---------------------------
+# robocopy already copied icons that live inside the onedir bundle ($binDir).
+# This loop handles the rare case where icons are stored OUTSIDE the bundle
+# (i.e. directly next to install.ps1 but not under $binDir). Icons already
+# present in $Dest from robocopy are skipped to avoid a redundant overwrite
+# that could race with Explorer re-opening freshly-written .ico files.
 foreach ($ico in @('Kommen.ico', 'Gehen.ico', 'WorkTimer.ico')) {
-    $found = Get-ChildItem -Path $Source -Filter $ico -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($found) { Copy-FileRetry -SrcPath $found.FullName -DestDir $Dest }
+    # Only act if robocopy did NOT already deliver this icon.
+    $destIco = Join-Path $Dest $ico
+    $bundleIco = Join-Path $binDir $ico
+    if (-not (Test-Path $destIco) -or -not (Test-Path $bundleIco)) {
+        $found = Get-ChildItem -Path $Source -Filter $ico -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { Copy-FileRetry -SrcPath $found.FullName -DestDir $Dest }
+    }
 }
 Write-Host ' fertig.'
 

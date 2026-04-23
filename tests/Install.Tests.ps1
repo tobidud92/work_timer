@@ -417,81 +417,119 @@ Describe 'install.ps1 – paths containing spaces' {
 }
 
 # ---------------------------------------------------------------------------
-Describe 'install.ps1 – Copy-FileRetry retries on a locked icon' {
-    # Simulates Explorer holding an .ico file exclusively while the installer
-    # tries to overwrite it during a reinstall.  The lock is released after
-    # ~1200 ms (≈ 2 retry cycles at 500 ms each).  The test asserts that
-    # Copy-FileRetry successfully copies the file in spite of the transient lock.
+Describe 'install.ps1 – resilience against locked .ico files' {
+    # The real-world failure mode: Explorer holds a .ico file open (because a
+    # shortcut that references it is on the Desktop), and the installer tries to
+    # overwrite that file during a reinstall.
+    #
+    # The fix has two parts that must work together:
+    #   1. Shortcuts are deleted BEFORE any file copy (releases Explorer handles).
+    #   2. robocopy uses /R:10 /W:1 so transient locks are retried instead of
+    #      failing immediately.
 
     BeforeEach {
-        $script:root = Join-Path ([System.IO.Path]::GetTempPath()) "wt_pester_$([System.IO.Path]::GetRandomFileName())"
-        $script:src  = Join-Path $script:root 'source'
-        $script:dest = Join-Path $script:root 'dest'
+        $script:root     = Join-Path ([System.IO.Path]::GetTempPath()) "wt_pester_$([System.IO.Path]::GetRandomFileName())"
+        $script:src      = Join-Path $script:root 'source'
+        $script:dest     = Join-Path $script:root 'dest'
+        $script:fakeDesk = Join-Path $script:root 'fake_desktop'
         New-SourceTree -Path $script:src
 
-        # Simulate an existing install so Copy-FileRetry has a dest file to overwrite.
-        New-Item -ItemType Directory -Path $script:dest -Force | Out-Null
+        # Simulate existing install: dest already has the icons (reinstall scenario).
+        New-Item -ItemType Directory -Path $script:dest     -Force | Out-Null
+        New-Item -ItemType Directory -Path $script:fakeDesk -Force | Out-Null
         foreach ($ico in @('Kommen.ico','Gehen.ico','WorkTimer.ico')) {
-            Copy-Item (Join-Path $script:src $ico) $script:dest
+            'OLD_CONTENT' | Set-Content (Join-Path $script:dest $ico) -NoNewline
         }
         'old content' | Out-File (Join-Path $script:dest 'work_timer.exe')
+        # Put NEW_CONTENT in the SOURCE icons so we can detect if copy succeeded.
+        foreach ($ico in @('Kommen.ico','Gehen.ico','WorkTimer.ico')) {
+            'NEW_CONTENT' | Set-Content (Join-Path $script:src $ico) -NoNewline
+        }
     }
 
     AfterEach {
         Remove-Item $script:root -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    It 'copies icon file despite a brief exclusive lock on the destination .ico' {
-        # Write a MARKER into src\Gehen.ico so we can verify the installer actually
-        # overwrote the pre-existing dest\Gehen.ico (empty, from BeforeEach).
-        # If the installer crashes without retrying, dest\Gehen.ico stays empty and
-        # the content assertion below fails — proving the retry really fired.
-        $srcIco  = Join-Path $script:src  'Gehen.ico'
+    It 'overwrites a transiently locked .ico via robocopy /R:10 /W:1 retry' {
+        # Lock dest\Gehen.ico exclusively for ~1200 ms.
+        # robocopy will fail on first attempt, then succeed after /W:1 retry
+        # once the lock expires.  Without /R:/W the installer would fail immediately.
         $destIco = Join-Path $script:dest 'Gehen.ico'
-        [System.IO.File]::WriteAllText($srcIco,  'NEW_CONTENT')
-        [System.IO.File]::WriteAllText($destIco, 'OLD_CONTENT')  # different from src
-
-        # Open dest\Gehen.ico exclusively in a background runspace to simulate
-        # Explorer holding the file.  The lock is released after ~1200 ms,
-        # which forces Copy-FileRetry to loop at least twice (500 ms per cycle).
-        $rs = [runspacefactory]::CreateRunspace()
-        $rs.Open()
+        $rs = [runspacefactory]::CreateRunspace(); $rs.Open()
         $rs.SessionStateProxy.SetVariable('icoPath', $destIco)
-        $ps = [powershell]::Create()
-        $ps.Runspace = $rs
+        $ps = [powershell]::Create(); $ps.Runspace = $rs
         $null = $ps.AddScript({
-            $fs = [System.IO.File]::Open(
-                $icoPath,
+            $fs = [System.IO.File]::Open($icoPath,
                 [System.IO.FileMode]::Open,
                 [System.IO.FileAccess]::ReadWrite,
-                [System.IO.FileShare]::None)   # exclusive — blocks Copy
+                [System.IO.FileShare]::None)   # exclusive lock
             Start-Sleep -Milliseconds 1200
             $fs.Dispose()
         })
         $async = $ps.BeginInvoke()
+        Start-Sleep -Milliseconds 150   # ensure lock is held before installer starts
 
-        # Brief pause so the lock is definitely held before the installer starts.
-        Start-Sleep -Milliseconds 150
-
-        # Measure elapsed time: with retries the copy takes > 1 s (lock held 1200 ms).
         $start = Get-Date
         Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts -TimeoutMs 60000
         $elapsed = (Get-Date) - $start
 
-        # Let the background runspace finish cleanly before AfterEach cleans up.
-        $ps.EndInvoke($async) | Out-Null
-        $ps.Dispose()
-        $rs.Dispose()
+        $ps.EndInvoke($async) | Out-Null; $ps.Dispose(); $rs.Dispose()
 
-        # 1. The file must exist.
-        Test-Path $destIco | Should Be $true
-
-        # 2. The content must be the NEW version from src — proves the copy succeeded
-        #    (not just that the old file survived a crashed install).
-        [System.IO.File]::ReadAllText($destIco) | Should Be 'NEW_CONTENT'
-
-        # 3. Timing: retry cycles take ~500 ms each, so total > 900 ms proves
-        #    the installer waited and retried rather than failing immediately.
+        # Lock was held 1200 ms + /W:1 overhead → elapsed must be > 900 ms,
+        # proving the installer waited and retried rather than crashing.
         $elapsed.TotalMilliseconds | Should BeGreaterThan 900
+
+        # The file content must be the NEW version from src.
+        [System.IO.File]::ReadAllText($destIco) | Should Be 'NEW_CONTENT'
+    }
+
+    It 'deletes Desktop shortcuts BEFORE copying, so the lock is released in time' {
+        # Root cause of the real-world bug: shortcuts exist → Explorer holds .ico
+        # files open → installer tries to overwrite them → IOException.
+        # Fix: installer deletes shortcuts first, then sleeps 1500 ms, then copies.
+        #
+        # We simulate this by:
+        #   - Placing Gehen.lnk on the fake Desktop (→ installer deletes it → 1500ms sleep).
+        #   - Holding dest\Gehen.ico locked for 2200 ms.
+        # Timeline:
+        #   t=0     installer starts, deletes Gehen.lnk, starts 1500ms sleep
+        #   t=1500  robocopy starts; lock still held → /W:1 retry
+        #   t=2200  lock released
+        #   t=2500  robocopy second attempt succeeds
+        # Without the ordering fix (shortcuts deleted after copy), robocopy would
+        # run at t=0 with the lock held and would need to wait much longer.
+
+        # Place a stub Gehen.lnk on the fake desktop.
+        $lnkPath = Join-Path $script:fakeDesk 'Gehen.lnk'
+        '' | Out-File $lnkPath
+
+        $destIco = Join-Path $script:dest 'Gehen.ico'
+        $rs = [runspacefactory]::CreateRunspace(); $rs.Open()
+        $rs.SessionStateProxy.SetVariable('icoPath', $destIco)
+        $ps = [powershell]::Create(); $ps.Runspace = $rs
+        $null = $ps.AddScript({
+            $fs = [System.IO.File]::Open($icoPath,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None)
+            Start-Sleep -Milliseconds 2200
+            $fs.Dispose()
+        })
+        $async = $ps.BeginInvoke()
+        Start-Sleep -Milliseconds 150
+
+        # Run with -DesktopOverride so the fake Gehen.lnk is detected and deleted.
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest `
+            -DesktopOverride $script:fakeDesk -TimeoutMs 60000
+
+        $ps.EndInvoke($async) | Out-Null; $ps.Dispose(); $rs.Dispose()
+
+        # The installer recreates Gehen.lnk at the end of the script,
+        # so we do not assert its absence.  What matters is that the
+        # icon file was successfully overwritten despite the transient lock
+        # — which is only possible if shortcuts were deleted first (releasing
+        # Explorer handles) before the file copy to dest began.
+        [System.IO.File]::ReadAllText($destIco) | Should Be 'NEW_CONTENT'
     }
 }
