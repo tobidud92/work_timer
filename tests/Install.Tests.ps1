@@ -442,40 +442,56 @@ Describe 'install.ps1 – Copy-FileRetry retries on a locked icon' {
     }
 
     It 'copies icon file despite a brief exclusive lock on the destination .ico' {
-        $lockedIco = Join-Path $script:dest 'Gehen.ico'
+        # Write a MARKER into src\Gehen.ico so we can verify the installer actually
+        # overwrote the pre-existing dest\Gehen.ico (empty, from BeforeEach).
+        # If the installer crashes without retrying, dest\Gehen.ico stays empty and
+        # the content assertion below fails — proving the retry really fired.
+        $srcIco  = Join-Path $script:src  'Gehen.ico'
+        $destIco = Join-Path $script:dest 'Gehen.ico'
+        [System.IO.File]::WriteAllText($srcIco,  'NEW_CONTENT')
+        [System.IO.File]::WriteAllText($destIco, 'OLD_CONTENT')  # different from src
 
-        # Open the dest icon with FileShare.None (exclusive) in a background runspace
-        # to simulate Explorer having the file open.  The lock is released after
-        # ~1200 ms — long enough for the installer to hit at least 2 retry cycles.
+        # Open dest\Gehen.ico exclusively in a background runspace to simulate
+        # Explorer holding the file.  The lock is released after ~1200 ms,
+        # which forces Copy-FileRetry to loop at least twice (500 ms per cycle).
         $rs = [runspacefactory]::CreateRunspace()
         $rs.Open()
-        $rs.SessionStateProxy.SetVariable('icoPath', $lockedIco)
+        $rs.SessionStateProxy.SetVariable('icoPath', $destIco)
         $ps = [powershell]::Create()
         $ps.Runspace = $rs
         $null = $ps.AddScript({
             $fs = [System.IO.File]::Open(
                 $icoPath,
                 [System.IO.FileMode]::Open,
-                [System.IO.FileAccess]::Read,
-                [System.IO.FileShare]::None)   # exclusive — no other process may open
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None)   # exclusive — blocks Copy
             Start-Sleep -Milliseconds 1200
             $fs.Dispose()
         })
         $async = $ps.BeginInvoke()
 
-        # Brief pause so the background thread definitely holds the lock before
-        # the installer starts.
+        # Brief pause so the lock is definitely held before the installer starts.
         Start-Sleep -Milliseconds 150
 
-        # Run installer.  Copy-FileRetry must retry until the lock is released.
+        # Measure elapsed time: with retries the copy takes > 1 s (lock held 1200 ms).
+        $start = Get-Date
         Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts -TimeoutMs 60000
+        $elapsed = (Get-Date) - $start
 
         # Let the background runspace finish cleanly before AfterEach cleans up.
         $ps.EndInvoke($async) | Out-Null
         $ps.Dispose()
         $rs.Dispose()
 
-        # The icon must have arrived in dest despite the transient lock.
-        Test-Path $lockedIco | Should Be $true
+        # 1. The file must exist.
+        Test-Path $destIco | Should Be $true
+
+        # 2. The content must be the NEW version from src — proves the copy succeeded
+        #    (not just that the old file survived a crashed install).
+        [System.IO.File]::ReadAllText($destIco) | Should Be 'NEW_CONTENT'
+
+        # 3. Timing: retry cycles take ~500 ms each, so total > 900 ms proves
+        #    the installer waited and retried rather than failing immediately.
+        $elapsed.TotalMilliseconds | Should BeGreaterThan 900
     }
 }

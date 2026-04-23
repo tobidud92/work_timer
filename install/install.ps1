@@ -26,9 +26,11 @@ function Write-DebugLog {
 Write-DebugLog "Installer started. Source=$Source"
 
 # Copy a file to a destination folder, retrying on transient locks (e.g. Explorer holding .ico).
-# Uses [IO.File]::Copy instead of Copy-Item: Copy-Item wraps IOException in a
-# CmdletInvocationException, which means 'catch [System.IO.IOException]' never fires.
-# [IO.File]::Copy throws IOException directly, so the typed catch works correctly.
+# Uses [IO.File]::Copy instead of Copy-Item.
+# IMPORTANT: In PowerShell 5.1 calls to .NET methods throw MethodInvocationException
+# (not the inner IOException directly), so we use a bare catch and unwrap the inner
+# exception chain to detect IOException.  A typed 'catch [IOException]' would never
+# fire and every lock condition would propagate immediately without retrying.
 function Copy-FileRetry {
     param(
         [string]$SrcPath,
@@ -41,12 +43,23 @@ function Copy-FileRetry {
         try {
             [System.IO.File]::Copy($SrcPath, $destPath, $true)   # $true = overwrite
             return
-        } catch [System.IO.IOException] {
-            if ($i -lt ($Retries - 1)) {
-                Write-DebugLog ("Copy locked, retry {0}/{1}: {2}" -f ($i+1), $Retries, $SrcPath)
-                Start-Sleep -Milliseconds $DelayMs
+        } catch {
+            # Unwrap: PS 5.1 wraps .NET method exceptions in MethodInvocationException.
+            # Walk the InnerException chain to find the real exception type.
+            $ex = $_.Exception
+            while ($ex.InnerException -and $ex -isnot [System.IO.IOException]) {
+                $ex = $ex.InnerException
+            }
+            if ($ex -is [System.IO.IOException]) {
+                if ($i -lt ($Retries - 1)) {
+                    Write-DebugLog ("Copy locked, retry {0}/{1}: {2}" -f ($i+1), $Retries, $SrcPath)
+                    Start-Sleep -Milliseconds $DelayMs
+                } else {
+                    Write-DebugLog ("Copy failed after $Retries retries: $SrcPath")
+                    throw
+                }
             } else {
-                Write-DebugLog ("Copy failed after $Retries retries: $SrcPath")
+                # Not a locking error – re-throw immediately.
                 throw
             }
         }
