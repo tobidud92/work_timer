@@ -138,7 +138,7 @@ $protectedDirs  = @('reports')
 $robocopyArgs = @("`"$binDir`"", "`"$Dest`"", '/E') +
                 @('/XF') + $protectedFiles +
                 @('/XD') + $protectedDirs +
-                @('/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
+                @('/MT:8', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP')
 # Redirect robocopy output to temp files: no pipe buffer, no PTY inheritance,
 # no deadlock possible regardless of output volume. -NoNewWindow prevents a
 # new console window opening.

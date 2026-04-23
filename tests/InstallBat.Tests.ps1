@@ -123,6 +123,11 @@ Describe "install.bat – content validation (catches missing -Source regression
         $content | Should Match '\[Console\]::OutputEncoding'
         $content | Should Match 'UTF8'
     }
+
+    It "install.ps1 uses /MT for multithreaded robocopy (faster copy)" {
+        $content = Get-Content $realPs1 -Raw
+        $content | Should Match '/MT'
+    }
 }
 
 # ---------------------------------------------------------------------------

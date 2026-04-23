@@ -1,0 +1,11 @@
+﻿C:\Users\z003xbha\Documents\Code\work_timer\install\install.ps1 : 
+work_timer.exe not found
+In C:\Users\z003xbha\Documents\Code\work_timer\tests\Install.Tests.ps1:128 
+Zeichen:13
++             & $installer -Source $script:src -Dest $script:dest -Skip ...
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorExcep 
+   tion
+    + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorExceptio 
+   n,install.ps1
+ 
