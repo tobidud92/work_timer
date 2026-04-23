@@ -2,7 +2,10 @@
     [string]$Source = (Get-Location).Path,
     [string]$Dest = $null,
     [switch]$SkipShortcuts,
-    [switch]$Debug
+    [switch]$Debug,
+    # Override the Desktop folder used for shortcut creation/removal.
+    # Intended for tests only; leave empty to use the real Desktop.
+    [string]$DesktopOverride = ''
 )
 
 # Ensure UTF-8 output regardless of the console codepage that was active when
@@ -186,7 +189,10 @@ if ($robocopyExit -ge 8) {
 # --- Remove existing shortcuts before copying icons -----------------------
 # Explorer holds .ico files open as long as a shortcut that references them
 # exists. Removing the shortcuts first releases the lock so Copy-Item succeeds.
-$desktop = [Environment]::GetFolderPath('Desktop')
+$desktop = if ($DesktopOverride) { $DesktopOverride } else { [Environment]::GetFolderPath('Desktop') }
+if ($DesktopOverride -and -not (Test-Path $DesktopOverride)) {
+    New-Item -ItemType Directory -Path $DesktopOverride -Force | Out-Null
+}
 $removedShortcut = $false
 foreach ($lnk in @('Kommen.lnk', 'Gehen.lnk', 'WorkTimer.lnk')) {
     $lnkPath = Join-Path $desktop $lnk

@@ -36,19 +36,23 @@ function Invoke-InstallerWithTimeout {
         [string]$Source,
         [string]$Dest,
         [switch]$SkipShortcuts,
+        [string]$DesktopOverride = '',
         [int]$TimeoutMs = 30000
     )
     $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
     $rs.Open()
-    $rs.SessionStateProxy.SetVariable('Ps1',          $Ps1)
-    $rs.SessionStateProxy.SetVariable('Source',       $Source)
-    $rs.SessionStateProxy.SetVariable('Dest',         $Dest)
-    $rs.SessionStateProxy.SetVariable('SkipShortcuts',$SkipShortcuts.IsPresent)
+    $rs.SessionStateProxy.SetVariable('Ps1',             $Ps1)
+    $rs.SessionStateProxy.SetVariable('Source',          $Source)
+    $rs.SessionStateProxy.SetVariable('Dest',            $Dest)
+    $rs.SessionStateProxy.SetVariable('SkipShortcuts',   $SkipShortcuts.IsPresent)
+    $rs.SessionStateProxy.SetVariable('DesktopOverride', $DesktopOverride)
 
     $ps = [powershell]::Create()
     $ps.Runspace = $rs
     if ($SkipShortcuts) {
         [void]$ps.AddScript('& $Ps1 -Source $Source -Dest $Dest -SkipShortcuts')
+    } elseif ($DesktopOverride) {
+        [void]$ps.AddScript('& $Ps1 -Source $Source -Dest $Dest -DesktopOverride $DesktopOverride')
     } else {
         [void]$ps.AddScript('& $Ps1 -Source $Source -Dest $Dest')
     }

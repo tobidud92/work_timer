@@ -19,19 +19,23 @@ function Invoke-InstallerWithTimeout {
         [string]$Source,
         [string]$Dest,
         [switch]$SkipShortcuts,
+        [string]$DesktopOverride = '',
         [int]$TimeoutMs = 30000
     )
     $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
     $rs.Open()
-    $rs.SessionStateProxy.SetVariable('Ps1',          $Ps1)
-    $rs.SessionStateProxy.SetVariable('Source',       $Source)
-    $rs.SessionStateProxy.SetVariable('Dest',         $Dest)
-    $rs.SessionStateProxy.SetVariable('SkipShortcuts',$SkipShortcuts.IsPresent)
+    $rs.SessionStateProxy.SetVariable('Ps1',             $Ps1)
+    $rs.SessionStateProxy.SetVariable('Source',          $Source)
+    $rs.SessionStateProxy.SetVariable('Dest',            $Dest)
+    $rs.SessionStateProxy.SetVariable('SkipShortcuts',   $SkipShortcuts.IsPresent)
+    $rs.SessionStateProxy.SetVariable('DesktopOverride', $DesktopOverride)
 
     $ps = [powershell]::Create()
     $ps.Runspace = $rs
     if ($SkipShortcuts) {
         [void]$ps.AddScript('& $Ps1 -Source $Source -Dest $Dest -SkipShortcuts')
+    } elseif ($DesktopOverride) {
+        [void]$ps.AddScript('& $Ps1 -Source $Source -Dest $Dest -DesktopOverride $DesktopOverride')
     } else {
         [void]$ps.AddScript('& $Ps1 -Source $Source -Dest $Dest')
     }
@@ -286,60 +290,94 @@ Describe 'install.ps1 – stale directory cleanup' {
 
 # ---------------------------------------------------------------------------
 Describe 'install.ps1 – shortcuts (-SkipShortcuts OFF)' {
+    # All shortcut tests use -DesktopOverride pointing to a temp directory.
+    # This guarantees the REAL Desktop is NEVER touched: no shortcuts are
+    # deleted or created there, so the user's existing shortcuts survive.
 
     BeforeEach {
-        $script:root   = Join-Path ([System.IO.Path]::GetTempPath()) "wt_pester_$([System.IO.Path]::GetRandomFileName())"
-        $script:src    = Join-Path $script:root 'source'
-        $script:dest   = Join-Path $script:root 'dest'
+        $script:root    = Join-Path ([System.IO.Path]::GetTempPath()) "wt_pester_$([System.IO.Path]::GetRandomFileName())"
+        $script:src     = Join-Path $script:root 'source'
+        $script:dest    = Join-Path $script:root 'dest'
+        $script:fakeDesk = Join-Path $script:root 'fake_desktop'
         New-SourceTree -Path $script:src -WithQuick
-
-        # Track any .lnk files we create so we can remove them in teardown
-        $script:lnksCreated = @()
+        New-Item -ItemType Directory -Path $script:fakeDesk -Force | Out-Null
     }
 
     AfterEach {
-        foreach ($lnk in $script:lnksCreated) {
-            Remove-Item $lnk -Force -ErrorAction SilentlyContinue
-        }
+        # Entire temp tree (including fake_desktop) is removed here.
+        # Real Desktop: untouched.
         Remove-Item $script:root -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    It 'creates Kommen.lnk, Gehen.lnk, and WorkTimer.lnk on the Desktop' {
-        $desktop = [Environment]::GetFolderPath('Desktop')
-
-        Invoke-InstallerWithTimeout $installer $script:src $script:dest
+    It 'creates Kommen.lnk, Gehen.lnk, and WorkTimer.lnk in the desktop folder' {
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -DesktopOverride $script:fakeDesk
 
         foreach ($lnk in @('Kommen.lnk','Gehen.lnk','WorkTimer.lnk')) {
-            $path = Join-Path $desktop $lnk
-            $script:lnksCreated += $path
-            Test-Path $path | Should Be $true
+            Test-Path (Join-Path $script:fakeDesk $lnk) | Should Be $true
         }
     }
 
-    It 'Kommen.lnk target is work_timer_quick.exe with --start-now argument' {
-        $desktop = [Environment]::GetFolderPath('Desktop')
-        Invoke-InstallerWithTimeout $installer $script:src $script:dest
+    It 'does NOT create any .lnk on the real Desktop' {
+        $realDesk = [Environment]::GetFolderPath('Desktop')
+        $before   = Get-ChildItem $realDesk -Filter '*.lnk' | Select-Object -ExpandProperty Name
 
-        $lnkPath = Join-Path $desktop 'Kommen.lnk'
-        $script:lnksCreated += $lnkPath
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -DesktopOverride $script:fakeDesk
+
+        $after = Get-ChildItem $realDesk -Filter '*.lnk' | Select-Object -ExpandProperty Name
+        # Same set of .lnk files as before — nothing added or removed
+        Compare-Object $before $after | Should BeNullOrEmpty
+    }
+
+    It 'Kommen.lnk target is work_timer_quick.exe with --start-now argument' {
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -DesktopOverride $script:fakeDesk
 
         $shell = New-Object -ComObject WScript.Shell
-        $lnk   = $shell.CreateShortcut($lnkPath)
+        $lnk   = $shell.CreateShortcut((Join-Path $script:fakeDesk 'Kommen.lnk'))
         $lnk.TargetPath | Should Match 'work_timer_quick\.exe'
         $lnk.Arguments  | Should Be '--start-now'
     }
 
     It 'Gehen.lnk target is work_timer_quick.exe with --end-now argument' {
-        $desktop = [Environment]::GetFolderPath('Desktop')
-        Invoke-InstallerWithTimeout $installer $script:src $script:dest
-
-        $lnkPath = Join-Path $desktop 'Gehen.lnk'
-        $script:lnksCreated += $lnkPath
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -DesktopOverride $script:fakeDesk
 
         $shell = New-Object -ComObject WScript.Shell
-        $lnk   = $shell.CreateShortcut($lnkPath)
+        $lnk   = $shell.CreateShortcut((Join-Path $script:fakeDesk 'Gehen.lnk'))
         $lnk.TargetPath | Should Match 'work_timer_quick\.exe'
         $lnk.Arguments  | Should Be '--end-now'
+    }
+
+    It 'WorkTimer.lnk target is work_timer.exe (not quick exe)' {
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -DesktopOverride $script:fakeDesk
+
+        $shell = New-Object -ComObject WScript.Shell
+        $lnk   = $shell.CreateShortcut((Join-Path $script:fakeDesk 'WorkTimer.lnk'))
+        $lnk.TargetPath | Should Match 'work_timer\.exe'
+        $lnk.TargetPath | Should Not Match 'quick'
+    }
+
+    It 'shortcut icons point to .ico files in Dest' {
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -DesktopOverride $script:fakeDesk
+
+        $shell = New-Object -ComObject WScript.Shell
+        foreach ($pair in @(
+            @{ Lnk = 'Kommen.lnk';   Ico = 'Kommen.ico'   }
+            @{ Lnk = 'Gehen.lnk';    Ico = 'Gehen.ico'    }
+            @{ Lnk = 'WorkTimer.lnk'; Ico = 'WorkTimer.ico' }
+        )) {
+            $lnk = $shell.CreateShortcut((Join-Path $script:fakeDesk $pair.Lnk))
+            $lnk.IconLocation | Should Match ([regex]::Escape($pair.Ico))
+        }
+    }
+
+    It 'reinstall updates existing shortcuts without error' {
+        # First install
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -DesktopOverride $script:fakeDesk
+        # Second install (reinstall) — must not throw and must still have all lnk files
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -DesktopOverride $script:fakeDesk
+
+        foreach ($lnk in @('Kommen.lnk','Gehen.lnk','WorkTimer.lnk')) {
+            Test-Path (Join-Path $script:fakeDesk $lnk) | Should Be $true
+        }
     }
 }
 
