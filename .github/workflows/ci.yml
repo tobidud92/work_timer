@@ -54,7 +54,7 @@ jobs:
         run: |
           # This step catches PyInstaller exclusion bugs (like excluding 'email' which
           # importlib.metadata needs) that would silently break the interactive date picker.
-          $result = & dist\work_timer\work_timer.exe --check-prompt-toolkit 2>&1
+          $result = & dist\work_timer\work_timer.exe --check-imports 2>&1
           Write-Host $result
           if ($LASTEXITCODE -ne 0) {
             Write-Error "prompt_toolkit failed to load in the built exe. Check _EXCLUDES in work_timer.spec."

@@ -2303,7 +2303,9 @@ if __name__ == "__main__":
     parser.add_argument('--end-now', action='store_true', help='Record end time now and exit')
     parser.add_argument('--log-file', help='Append quick-action events to this logfile')
     parser.add_argument('--check-prompt-toolkit', action='store_true',
-                        help='Test whether prompt_toolkit loads successfully and exit 0/1')
+                        help='(deprecated alias) same as --check-imports')
+    parser.add_argument('--check-imports', action='store_true',
+                        help='Test all lazy imports (prompt_toolkit, reportlab) and exit 0/1')
     parser.add_argument('--mshta-timeout', type=int, help='Timeout in seconds for mshta popups (quick-action notifications)')
     args, _ = parser.parse_known_args()
 
@@ -2316,19 +2318,34 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-    # Self-test: verify prompt_toolkit loads — used by CI smoke test after build
-    if getattr(args, 'check_prompt_toolkit', False):
+    # Self-test: verify all lazy imports load — used by CI smoke test after build
+    if getattr(args, 'check_imports', False) or getattr(args, 'check_prompt_toolkit', False):
+        failures = []
+        # 1. prompt_toolkit
         _ensure_prompt_toolkit()
         if HAVE_PROMPT_TOOLKIT:
             print('prompt_toolkit: OK')
-            sys.exit(0)
         else:
+            print('prompt_toolkit: FAILED')
+            failures.append('prompt_toolkit')
+        # 2. reportlab
+        try:
+            from reportlab.lib.pagesizes import A4  # noqa: F401
+            from reportlab.platypus import SimpleDocTemplate  # noqa: F401
+            from reportlab.lib import colors  # noqa: F401
+            print('reportlab: OK')
+        except Exception as _rl_err:
+            import traceback as _tb_rl
+            _log_error('reportlab import failed', _tb_rl.format_exc())
+            print(f'reportlab: FAILED ({_rl_err})')
+            failures.append('reportlab')
+        if failures:
+            print(f'\nFailed imports: {failures}')
             if os.path.exists(_LOG_FILE):
                 with open(_LOG_FILE, encoding='utf-8') as _f:
                     print(_f.read())
-            else:
-                print('prompt_toolkit: FAILED (no error log)')
             sys.exit(1)
+        sys.exit(0)
 
     # If invoked as quick-action, perform and exit before prompting for name/config
     if args.start_now:
