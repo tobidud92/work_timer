@@ -1030,7 +1030,7 @@ def compute_day_delta(entry, manually_entered_holidays=None):
             return delta, delta_str, zuschlag_info
         else:
             return 0.0, '—', ''
-    elif typ == 'Urlaub':
+    elif typ in ('Urlaub', 'Krankheit'):
         return 0.0, '±0.00 h', ''
     elif typ == 'Zeitausgleich':
         delta = -DAILY_HOURS
@@ -1097,7 +1097,7 @@ def compute_saldo(data):
                     zuschlag_stunden += apply_surcharge(netto, dt) - netto
             except ValueError:
                 pass
-        elif typ == 'Urlaub':
+        elif typ in ('Urlaub', 'Krankheit'):
             ist_brutto += DAILY_HOURS
 
     ist_netto  = ist_brutto - pausen_abzug
@@ -1247,7 +1247,7 @@ def add_special_day(day_type):
         return
 
     # Otherwise handle special day types that are stored in the CSV
-    if day_type == 'Urlaub':
+    if day_type in ('Urlaub', 'Krankheit'):
         # For vacation allow entering a range: start and end
         print('Urlaubszeitraum eingeben:')
         start_internal = input_date('Urlaubsbeginn')
@@ -1341,17 +1341,17 @@ def add_special_day(day_type):
         # apply additions and overwrites
         added_count = 0
         for di in to_add:
-            data.append({'Datum': di, 'Typ': 'Urlaub', 'Startzeit': '', 'Endzeit': '', 'Dauer': '', 'Kommentar': comment})
+            data.append({'Datum': di, 'Typ': day_type, 'Startzeit': '', 'Endzeit': '', 'Dauer': '', 'Kommentar': comment})
             added_count += 1
 
         for di in to_overwrite:
             existing_entry = get_entry_by_date(data, di)
             if existing_entry:
-                existing_entry.update({'Typ': 'Urlaub', 'Startzeit': '', 'Endzeit': '', 'Dauer': '', 'Kommentar': comment})
+                existing_entry.update({'Typ': day_type, 'Startzeit': '', 'Endzeit': '', 'Dauer': '', 'Kommentar': comment})
                 added_count += 1
 
         save_data(data)
-        print(f"{added_count} Urlaubstag(er) hinzugefügt/überschrieben.")
+        print(f"{added_count} {day_type}stag(e) hinzugefügt/überschrieben.")
         return
 
     # Zeitausgleich and other single-day types: existing behaviour
@@ -1603,6 +1603,7 @@ def generate_pdf_report():
         'Feiertag':         colors.HexColor('#E6F2FF'),
         'Zeitausgleich':    colors.HexColor('#FFFFE6'),
         'Fehltag':          colors.HexColor('#F5E6E6'),  # light red for missing days
+        'Krankheit':        colors.HexColor('#E6F0FF'),  # light blue for sick days
         'Header':           colors.HexColor('#CCCCCC'),
         'MultiCheckin':     colors.HexColor('#C39BD3'),
         'MultiCheckinLight':colors.HexColor('#E8D5F0'),
@@ -1743,7 +1744,7 @@ def generate_pdf_report():
                         month_zuschlag += apply_surcharge(netto, dt) - netto
                 except ValueError:
                     pass
-            elif typ == 'Urlaub':
+            elif typ in ('Urlaub', 'Krankheit'):
                 month_ist += DAILY_HOURS
 
         month_netto  = month_ist - month_pause
@@ -2333,6 +2334,8 @@ def browse_months():
                             lines.append(('class:fehltag', text))
                         elif typ == 'Urlaub':
                             lines.append(('class:urlaub', text))
+                        elif typ == 'Krankheit':
+                            lines.append(('class:krank', text))
                         elif typ == 'Feiertag':
                             lines.append(('class:feiertag', text))
                         elif typ == 'Sonderarbeit':
@@ -2379,6 +2382,7 @@ def browse_months():
                 'feiertag': 'fg:ansiblue',
                 'sonder':   'fg:ansimagenta',
                 'zeitaus':  'fg:ansicyan',
+                'krank':    'fg:ansiblue',
                 'empty':    'italic',
             })
 
@@ -2424,6 +2428,35 @@ def browse_months():
             break
 
 
+def add_absence_day():
+    """Submenu: choose Urlaub, Gleitzeit (Zeitausgleich), or Krankheit, then enter date(s)."""
+    items = [
+        ('1', 'Urlaubstag(e) eintragen'),
+        ('2', 'Gleittag (Zeitausgleich) eintragen'),
+        ('3', 'Krankheitstag(e) eintragen'),
+    ]
+    choice = _interactive_menu('Abwesenheit eintragen', items)
+    if choice == '1':
+        add_special_day('Urlaub')
+    elif choice == '2':
+        add_special_day('Zeitausgleich')
+    elif choice == '3':
+        add_special_day('Krankheit')
+
+
+def correct_work_time():
+    """Submenu: choose Arbeitsbeginn or Arbeitsende to correct."""
+    items = [
+        ('1', 'Arbeitsbeginn korrigieren'),
+        ('2', 'Arbeitsende korrigieren'),
+    ]
+    choice = _interactive_menu('Arbeitszeit korrigieren', items)
+    if choice == '1':
+        edit_work_start()
+    elif choice == '2':
+        edit_work_end()
+
+
 def main_menu():
     _MAIN_ITEMS = [
         ('1', 'Arbeitsbeginn erfassen (jetzt)'),
@@ -2431,8 +2464,8 @@ def main_menu():
         ('3', 'Zeitsaldo anzeigen'),
         ('4', 'Report als PDF erstellen'),
         ('5', 'Monatsübersicht (interaktiv)'),
-        ('6', 'Arbeitsbeginn korrigieren'),
-        ('7', 'Arbeitsende korrigieren'),
+        ('6', 'Urlaub / Gleitzeit / Krankheit eintragen'),
+        ('7', 'Arbeitszeit korrigieren (Beginn / Ende)'),
         ('8', 'Einstellungen / Optionen'),
         ('9', 'Beenden'),
     ]
@@ -2458,9 +2491,9 @@ def main_menu():
     elif choice == '5':
         browse_months()
     elif choice == '6':
-        edit_work_start()
+        add_absence_day()
     elif choice == '7':
-        edit_work_end()
+        correct_work_time()
     elif choice == '8':
         settings_menu()
     elif choice == '9' or choice == '':
