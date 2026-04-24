@@ -1519,6 +1519,41 @@ def edit_work_end():
 
 # --- PDF Report ---
 
+def _fill_missing_weekdays(entries_for_month, month_year, holidays, global_start_date, today):
+    """Return entries_for_month expanded with synthetic 'Fehltag' rows for every
+    Mon–Fri that has no entry and is not a public/config holiday.
+
+    The date range covered is max(month_start, global_start_date) … min(month_end, today).
+    Saturdays and Sundays are intentionally excluded; they only appear when there
+    is a real 'Sonderarbeit' entry.
+    """
+    import calendar as _cal
+    month_dt    = datetime.strptime(month_year, '%Y-%m')
+    month_start = date(month_dt.year, month_dt.month, 1)
+    last_day    = _cal.monthrange(month_dt.year, month_dt.month)[1]
+    month_end   = date(month_dt.year, month_dt.month, last_day)
+
+    range_start = max(month_start, global_start_date)
+    range_end   = min(month_end, today)
+
+    existing_dates = {e.get('Datum') for e in entries_for_month}
+
+    synthetic = []
+    cur = range_start
+    while cur <= range_end:
+        di = cur.strftime(DATE_FORMAT_INTERNAL)
+        if cur.weekday() < 5 and di not in PUBLIC_HOLIDAYS and di not in holidays and di not in existing_dates:
+            synthetic.append({
+                'Datum': di, 'Typ': 'Fehltag', 'Startzeit': '', 'Endzeit': '',
+                'Dauer': '', 'Kommentar': '', '_synthetic': True,
+            })
+        cur += timedelta(days=1)
+
+    combined = list(entries_for_month) + synthetic
+    combined.sort(key=lambda e: (e.get('Datum', ''), 0 if not e.get('_synthetic') else 1))
+    return combined
+
+
 def generate_pdf_report():
     # Lazy imports — reportlab is heavy; only load it when actually generating a PDF
     from reportlab.lib.pagesizes import A4
@@ -1567,9 +1602,10 @@ def generate_pdf_report():
         'Urlaub':           colors.HexColor('#FFF2E6'),
         'Feiertag':         colors.HexColor('#E6F2FF'),
         'Zeitausgleich':    colors.HexColor('#FFFFE6'),
+        'Fehltag':          colors.HexColor('#F5E6E6'),  # light red for missing days
         'Header':           colors.HexColor('#CCCCCC'),
-        'MultiCheckin':     colors.HexColor('#C39BD3'),  # purple for first shift of multi-checkin day
-        'MultiCheckinLight':colors.HexColor('#E8D5F0'),  # light purple for subsequent shifts
+        'MultiCheckin':     colors.HexColor('#C39BD3'),
+        'MultiCheckinLight':colors.HexColor('#E8D5F0'),
     }
     delta_pos_color = colors.HexColor('#006600')
     delta_neg_color = colors.HexColor('#CC0000')
@@ -1665,8 +1701,23 @@ def generate_pdf_report():
         if story:
             story.append(PageBreak())
 
-        # Monatssaldo berechnen
-        month_soll = month_ist = month_pause = month_zuschlag = 0.0
+        # Monatssaldo berechnen — kalenderbasiert (identisch zu compute_saldo-Logik)
+        import calendar as _cal2
+        _m_dt      = datetime.strptime(month_year, '%Y-%m')
+        _m_start   = date(_m_dt.year, _m_dt.month, 1)
+        _m_last    = _cal2.monthrange(_m_dt.year, _m_dt.month)[1]
+        _m_end     = date(_m_dt.year, _m_dt.month, _m_last)
+        _m_rstart  = max(_m_start, s['start_date'])
+        _m_rend    = min(_m_end, today)
+        month_soll = 0.0
+        _cur = _m_rstart
+        while _cur <= _m_rend:
+            _di = _cur.strftime(DATE_FORMAT_INTERNAL)
+            if _cur.weekday() < 5 and _di not in PUBLIC_HOLIDAYS and _di not in holidays:
+                month_soll += DAILY_HOURS
+            _cur += timedelta(days=1)
+
+        month_ist = month_pause = month_zuschlag = 0.0
         for entry in monthly_data[month_year]:
             try:
                 ed = datetime.strptime(entry['Datum'], DATE_FORMAT_INTERNAL).date()
@@ -1678,7 +1729,7 @@ def generate_pdf_report():
 
             if ed.weekday() < 5 and di not in PUBLIC_HOLIDAYS and di not in holidays:
                 if typ != 'Sonderarbeit':
-                    month_soll += DAILY_HOURS
+                    pass  # soll now calendar-based above
 
             if typ in ('Arbeit', 'Sonderarbeit') and dauer_str:
                 try:
@@ -1753,10 +1804,16 @@ def generate_pdf_report():
         ]]
         current_table_style = list(table_style_base)
 
+        # Expand entries with synthetic Fehltag rows for weekday gaps
+        expanded_entries = _fill_missing_weekdays(
+            monthly_data[month_year], month_year, holidays, s['start_date'], today
+        )
+
         # Detect dates with multiple entries so we can render each interval as its own row
         date_counts = {}
-        for e in monthly_data[month_year]:
-            date_counts[e.get('Datum', '')] = date_counts.get(e.get('Datum', ''), 0) + 1
+        for e in expanded_entries:
+            if not e.get('_synthetic'):
+                date_counts[e.get('Datum', '')] = date_counts.get(e.get('Datum', ''), 0) + 1
 
         # helper to lighten a HexColor by blending with white
         def _lighten_color(hexcol, amount):
@@ -1778,7 +1835,7 @@ def generate_pdf_report():
             if cnt > 1:
                 total_b = sum(
                     float(e.get('Dauer') or 0)
-                    for e in monthly_data[month_year]
+                    for e in expanded_entries
                     if e.get('Datum') == di and e.get('Typ') == 'Arbeit' and e.get('Dauer')
                 )
                 multi_day_stats[di] = {
@@ -1788,10 +1845,24 @@ def generate_pdf_report():
 
         # track per-date occurrence index (0-based) for color assignment
         occ_index_for_date = {}
-        for entry in monthly_data[month_year]:
+        for entry in expanded_entries:
             di = entry.get('Datum', '')
             occ_index = occ_index_for_date.get(di, 0)
             occ_index_for_date[di] = occ_index + 1
+
+            # --- Synthetic Fehltag row (no start/end recorded) ---
+            if entry.get('_synthetic'):
+                delta_val = -DAILY_HOURS
+                delta_str = f'{delta_val:.2f} h'
+                table_data.append([
+                    sanitize_for_pdf(to_display(di), max_len=20),
+                    'Fehltag', '', '', '', '', delta_str,
+                ])
+                row_index = len(table_data) - 1
+                current_table_style.append(('BACKGROUND', (0, row_index), (-1, row_index), type_colors['Fehltag']))
+                current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_neg_color))
+                current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
+                continue
 
             multiple_intervals = date_counts.get(di, 0) > 1
             is_first_of_date   = occ_index == 0
