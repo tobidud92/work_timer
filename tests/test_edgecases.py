@@ -141,6 +141,34 @@ class TestFillMissingWeekdays(unittest.TestCase):
         self.assertEqual(syn['Dauer'], '')
 
 
+class TestInteractiveMenu(unittest.TestCase):
+    """Tests for _interactive_menu() plain-text fallback."""
+
+    def _call(self, user_input, items=None):
+        if items is None:
+            items = [('1', 'Option A'), ('2', 'Option B'), ('0', 'Zurück')]
+        orig = work_timer.HAVE_PROMPT_TOOLKIT
+        work_timer.HAVE_PROMPT_TOOLKIT = False
+        try:
+            with patch('builtins.input', return_value=user_input):
+                return work_timer._interactive_menu('Test', items)
+        finally:
+            work_timer.HAVE_PROMPT_TOOLKIT = orig
+
+    def test_returns_selected_key(self):
+        self.assertEqual(self._call('2'), '2')
+
+    def test_returns_zero_for_back(self):
+        self.assertEqual(self._call('0'), '0')
+
+    def test_unknown_input_returned_as_is(self):
+        """Unknown input is returned as-is so callers can show error messages."""
+        self.assertEqual(self._call('x'), 'x')
+
+    def test_empty_input_returned_as_empty_string(self):
+        self.assertEqual(self._call(''), '')
+
+
 class TestBrowseMonths(unittest.TestCase):
     """Tests for browse_months() data preparation and fallback rendering."""
 
