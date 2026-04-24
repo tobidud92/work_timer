@@ -2115,19 +2115,224 @@ def export_holidays_to_csv(path=None, date_style='display'):
 
 # --- Hauptmenü ---
 
+def browse_months():
+    """Interaktive Monatsansicht: ←/→ Monat wechseln, ↑/↓ Zeile scrollen, q/Esc beenden."""
+    data = load_data()
+    if not data:
+        print("Keine Daten vorhanden.")
+        return
+
+    cfg           = load_config()
+    holidays_map  = cfg.get('holidays', {}) if isinstance(cfg, dict) else {}
+    holidays      = set(holidays_map.keys())
+    today         = date.today()
+
+    # Build sorted list of month_year keys (all months that have entries OR fall
+    # between first entry month and current month so gaps are visible)
+    from_months = sorted({
+        datetime.strptime(e['Datum'], DATE_FORMAT_INTERNAL).strftime('%Y-%m')
+        for e in data
+        if 'Datum' in e
+    })
+    if not from_months:
+        print("Keine gültigen Datumseinträge gefunden.")
+        return
+    all_months = from_months  # only show months that have at least one entry
+
+    # Group real entries by month
+    monthly_data: dict[str, list] = {}
+    for e in sorted(data, key=lambda x: x.get('Datum', '')):
+        try:
+            mo = datetime.strptime(e['Datum'], DATE_FORMAT_INTERNAL).strftime('%Y-%m')
+        except ValueError:
+            continue
+        monthly_data.setdefault(mo, []).append(e)
+
+    # Determine global start date for _fill_missing_weekdays
+    start_date = min(
+        datetime.strptime(e['Datum'], DATE_FORMAT_INTERNAL).date()
+        for e in data if 'Datum' in e
+    )
+
+    def _rows_for_month(month_year):
+        """Return expanded rows (real + Fehltag) for a given month."""
+        real = monthly_data.get(month_year, [])
+        return _fill_missing_weekdays(real, month_year, holidays, start_date, today)
+
+    def _fmt_row(entry, width=72):
+        typ = entry.get('Typ', '?')
+        dat = to_display(entry.get('Datum', ''))
+        st  = entry.get('Startzeit', '') or '—'
+        et  = entry.get('Endzeit', '')   or '—'
+        dur = entry.get('Dauer', '')
+        dur_s = f'{float(dur):5.2f} h' if dur else '   —   '
+        kom = entry.get('Kommentar', '')
+        # delta
+        if entry.get('_synthetic'):
+            delta_s = f'{-DAILY_HOURS:.2f} h'
+        else:
+            dv, delta_s, _ = compute_day_delta(entry, holidays)
+
+        line = f'  {dat}  {typ:<14s}  {st} – {et}  {dur_s}  {delta_s}'
+        if kom:
+            line += f'  [{kom[:20]}]'
+        return line
+
+    _ensure_prompt_toolkit()
+
+    if HAVE_PROMPT_TOOLKIT:
+        try:
+            from prompt_toolkit.application import Application
+            from prompt_toolkit.key_binding import KeyBindings
+            from prompt_toolkit.layout import Layout
+            from prompt_toolkit.layout.containers import Window
+            from prompt_toolkit.layout.controls import FormattedTextControl
+            from prompt_toolkit.styles import Style
+
+            month_idx = [len(all_months) - 1]  # start with most recent month
+            cursor    = [0]
+
+            def _clamp_cursor(rows):
+                if not rows:
+                    cursor[0] = 0
+                else:
+                    cursor[0] = max(0, min(len(rows) - 1, cursor[0]))
+
+            def get_text():
+                mo    = all_months[month_idx[0]]
+                rows  = _rows_for_month(mo)
+                _clamp_cursor(rows)
+
+                try:
+                    month_name = datetime.strptime(mo, '%Y-%m').strftime('%B %Y')
+                except ValueError:
+                    month_name = mo
+
+                m_pos = f'{month_idx[0] + 1}/{len(all_months)}'
+                header = (
+                    f'  ◀ ▶  {month_name}  ({m_pos})\n'
+                    f'  ↑/↓ scrollen · ←/→ Monat · q beenden\n'
+                    f'  {"─" * 66}\n'
+                )
+                lines = [('class:header', header)]
+
+                if not rows:
+                    lines.append(('class:empty', '  (Keine Einträge)\n'))
+                else:
+                    for i, e in enumerate(rows):
+                        text = _fmt_row(e) + '\n'
+                        typ  = e.get('Typ', '')
+                        if i == cursor[0]:
+                            lines.append(('class:cursor', '▶' + text[1:]))
+                        elif e.get('_synthetic'):
+                            lines.append(('class:fehltag', text))
+                        elif typ == 'Urlaub':
+                            lines.append(('class:urlaub', text))
+                        elif typ == 'Feiertag':
+                            lines.append(('class:feiertag', text))
+                        elif typ == 'Sonderarbeit':
+                            lines.append(('class:sonder', text))
+                        elif typ == 'Zeitausgleich':
+                            lines.append(('class:zeitaus', text))
+                        else:
+                            lines.append(('', text))
+                return lines
+
+            kb = KeyBindings()
+
+            @kb.add('up')
+            def _up(event):
+                rows = _rows_for_month(all_months[month_idx[0]])
+                cursor[0] = max(0, cursor[0] - 1)
+
+            @kb.add('down')
+            def _down(event):
+                rows = _rows_for_month(all_months[month_idx[0]])
+                cursor[0] = min(max(0, len(rows) - 1), cursor[0] + 1)
+
+            @kb.add('left')
+            def _prev_month(event):
+                month_idx[0] = max(0, month_idx[0] - 1)
+                cursor[0] = 0
+
+            @kb.add('right')
+            def _next_month(event):
+                month_idx[0] = min(len(all_months) - 1, month_idx[0] + 1)
+                cursor[0] = 0
+
+            @kb.add('q')
+            @kb.add('escape')
+            @kb.add('c-c')
+            def _quit(event):
+                event.app.exit()
+
+            style = Style.from_dict({
+                'header':   'bold',
+                'cursor':   'bold underline',
+                'fehltag':  'fg:ansired',
+                'urlaub':   'fg:ansiyellow',
+                'feiertag': 'fg:ansiblue',
+                'sonder':   'fg:ansimagenta',
+                'zeitaus':  'fg:ansicyan',
+                'empty':    'italic',
+            })
+
+            app = Application(
+                layout=Layout(Window(FormattedTextControl(get_text, focusable=True))),
+                key_bindings=kb,
+                style=style,
+                full_screen=False,
+                mouse_support=False,
+            )
+            app.run()
+            return
+
+        except Exception as _browse_err:
+            try:
+                import traceback as _tb_br
+                _log_error('browse_months prompt_toolkit error', _tb_br.format_exc())
+            except Exception:
+                pass
+            # fall through to plain-text fallback
+
+    # ── Plain-text fallback (no prompt_toolkit) ────────────────────────────
+    idx = len(all_months) - 1
+    while True:
+        mo   = all_months[idx]
+        rows = _rows_for_month(mo)
+        try:
+            month_name = datetime.strptime(mo, '%Y-%m').strftime('%B %Y')
+        except ValueError:
+            month_name = mo
+        print(f'\n  ── {month_name}  ({idx + 1}/{len(all_months)}) ──')
+        if not rows:
+            print('  (Keine Einträge)')
+        else:
+            for e in rows:
+                print(_fmt_row(e))
+        nav = input('\n  [p]rev / [n]ext / [q]uit: ').strip().lower()
+        if nav == 'n':
+            idx = min(len(all_months) - 1, idx + 1)
+        elif nav == 'p':
+            idx = max(0, idx - 1)
+        else:
+            break
+
+
 def main_menu():
     print_header()
     print("1. Arbeitsbeginn erfassen (jetzt)")
     print("2. Arbeitsende erfassen (jetzt)")
     print("3. Zeitsaldo anzeigen")
     print("4. Report als PDF erstellen")
-    print("5. Arbeitsbeginn korrigieren")
-    print("6. Arbeitsende korrigieren")
-    print("7. Einstellungen / Optionen")
-    print("8. Beenden")
+    print("5. Monatsübersicht (interaktiv)")
+    print("6. Arbeitsbeginn korrigieren")
+    print("7. Arbeitsende korrigieren")
+    print("8. Einstellungen / Optionen")
+    print("9. Beenden")
     print("-" * 40)
 
-    choice = input("Wähle eine Option (1-8): ")
+    choice = input("Wähle eine Option (1-9): ")
 
     if choice == '1':
         start_work()
@@ -2147,12 +2352,14 @@ def main_menu():
             print(f'Fehler beim Erstellen des Reports: {_report_err}')
             print(f'Details wurden gespeichert in: {_LOG_FILE}')
     elif choice == '5':
-        edit_work_start()
+        browse_months()
     elif choice == '6':
-        edit_work_end()
+        edit_work_start()
     elif choice == '7':
-        settings_menu()
+        edit_work_end()
     elif choice == '8':
+        settings_menu()
+    elif choice == '9':
         print("Auf Wiedersehen!")
         return False
     else:

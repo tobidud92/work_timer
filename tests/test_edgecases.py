@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, date
+from unittest.mock import patch
 
 import src.work_timer as work_timer
 
@@ -138,6 +139,82 @@ class TestFillMissingWeekdays(unittest.TestCase):
         self.assertTrue(syn['_synthetic'])
         self.assertEqual(syn['Typ'], 'Fehltag')
         self.assertEqual(syn['Dauer'], '')
+
+
+class TestBrowseMonths(unittest.TestCase):
+    """Tests for browse_months() data preparation and fallback rendering."""
+
+    def _make_entries(self, td):
+        """Create a small dataset spanning two months."""
+        work_timer.CSV_FILE    = os.path.join(td, 'arbeitszeiten.csv')
+        work_timer.CONFIG_FILE = os.path.join(td, 'config.json')
+        data = [
+            {'Datum': '2026-03-09', 'Typ': 'Arbeit', 'Startzeit': '08:00',
+             'Endzeit': '16:00', 'Dauer': '8.00', 'Kommentar': ''},
+            {'Datum': '2026-03-11', 'Typ': 'Arbeit', 'Startzeit': '08:00',
+             'Endzeit': '16:00', 'Dauer': '8.00', 'Kommentar': ''},
+            {'Datum': '2026-04-01', 'Typ': 'Arbeit', 'Startzeit': '09:00',
+             'Endzeit': '17:00', 'Dauer': '8.00', 'Kommentar': ''},
+        ]
+        work_timer.save_data(data)
+        import json
+        with open(work_timer.CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'name': 'Test', 'holidays': {}}, f)
+        return data
+
+    def test_no_data_returns_early(self):
+        """browse_months prints a message and returns when no data is available."""
+        with tempfile.TemporaryDirectory() as td:
+            work_timer.CSV_FILE    = os.path.join(td, 'arbeitszeiten.csv')
+            work_timer.CONFIG_FILE = os.path.join(td, 'config.json')
+            import json
+            with open(work_timer.CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump({'name': 'Test', 'holidays': {}}, f)
+            # Empty CSV → load_data returns []
+            with open(work_timer.CSV_FILE, 'w', encoding='utf-8') as f:
+                f.write('')
+            # Should not raise; just print a message and return
+            work_timer.browse_months()
+
+    def test_fallback_plain_text_quit_immediately(self):
+        """Plain-text fallback: entering 'q' exits after showing first month."""
+        with tempfile.TemporaryDirectory() as td:
+            self._make_entries(td)
+            # Disable prompt_toolkit to force fallback
+            orig = work_timer.HAVE_PROMPT_TOOLKIT
+            work_timer.HAVE_PROMPT_TOOLKIT = False
+            try:
+                with patch('builtins.input', return_value='q'):
+                    work_timer.browse_months()
+            finally:
+                work_timer.HAVE_PROMPT_TOOLKIT = orig
+
+    def test_fallback_navigate_next_then_quit(self):
+        """Plain-text fallback: navigate next month then quit."""
+        with tempfile.TemporaryDirectory() as td:
+            self._make_entries(td)
+            orig = work_timer.HAVE_PROMPT_TOOLKIT
+            work_timer.HAVE_PROMPT_TOOLKIT = False
+            try:
+                inputs = iter(['n', 'q'])
+                with patch('builtins.input', side_effect=inputs):
+                    work_timer.browse_months()
+            finally:
+                work_timer.HAVE_PROMPT_TOOLKIT = orig
+
+    def test_fallback_navigate_prev_at_start_stays(self):
+        """Plain-text fallback: navigating prev at first month doesn't crash."""
+        with tempfile.TemporaryDirectory() as td:
+            self._make_entries(td)
+            orig = work_timer.HAVE_PROMPT_TOOLKIT
+            work_timer.HAVE_PROMPT_TOOLKIT = False
+            try:
+                # Start at last month, go to prev, prev again (stays at first), quit
+                inputs = iter(['p', 'p', 'q'])
+                with patch('builtins.input', side_effect=inputs):
+                    work_timer.browse_months()
+            finally:
+                work_timer.HAVE_PROMPT_TOOLKIT = orig
 
 
 if __name__ == '__main__':
