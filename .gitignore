@@ -45,4 +45,7 @@ work_timer.exe
 
 # User data files in root (copies placed there during testing)
 /arbeitszeiten.csv
+
+# Runtime state (changes on every checkin/checkout)
+checkin_state.json
 /config.json
