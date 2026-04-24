@@ -438,10 +438,13 @@ Describe 'install.ps1 – resilience against locked .ico files' {
         New-Item -ItemType Directory -Path $script:dest     -Force | Out-Null
         New-Item -ItemType Directory -Path $script:fakeDesk -Force | Out-Null
         foreach ($ico in @('Kommen.ico','Gehen.ico','WorkTimer.ico')) {
-            'OLD_CONTENT' | Set-Content (Join-Path $script:dest $ico) -NoNewline
+            'OLD' | Set-Content (Join-Path $script:dest $ico) -NoNewline
         }
         'old content' | Out-File (Join-Path $script:dest 'work_timer.exe')
         # Put NEW_CONTENT in the SOURCE icons so we can detect if copy succeeded.
+        # Use a different byte length ('OLD'=3 vs 'NEW_CONTENT'=11) so robocopy
+        # always detects a size difference and decides to copy — avoiding a race
+        # where dest has a later timestamp and robocopy skips due to 'up to date'.
         foreach ($ico in @('Kommen.ico','Gehen.ico','WorkTimer.ico')) {
             'NEW_CONTENT' | Set-Content (Join-Path $script:src $ico) -NoNewline
         }
@@ -572,5 +575,151 @@ Describe 'install.ps1 – resilience against locked .ico files' {
 
         # Installer must have finished well within the 60 s budget.
         $elapsed.TotalSeconds | Should BeLessThan 60
+    }
+}
+
+Describe 'install.ps1 – ico copy logic' {
+    # Regression tests for the two bugs fixed in commit 0edb3aa:
+    #
+    # Bug 1: The skip condition for the extra ico copy loop was inverted.
+    #        '-not destIco -or -not bundleIco' fired even when bundleIco exists
+    #        (i.e. robocopy already handled the icon), causing a redundant
+    #        Copy-FileRetry that raced against Explorer's icon cache refresh.
+    #        Fix: 'if (Test-Path $bundleIco) { continue }' — skip when already in bundle.
+    #
+    # Bug 2: After exhausting all retries Copy-FileRetry threw a hard error.
+    #        Icons already copied by robocopy are correct; a failed extra copy
+    #        is never fatal.  Fix: Write-Warning + return instead of throw.
+
+    BeforeEach {
+        $script:root     = Join-Path ([System.IO.Path]::GetTempPath()) "wt_ico_$([System.IO.Path]::GetRandomFileName())"
+        $script:src      = Join-Path $script:root 'source'
+        $script:dest     = Join-Path $script:root 'dest'
+        New-Item -ItemType Directory -Path $script:src  -Force | Out-Null
+        New-Item -ItemType Directory -Path $script:dest -Force | Out-Null
+    }
+
+    AfterEach {
+        # Release permanent lock if held by a test.
+        if ($script:icoLockPs) {
+            try { $script:icoLockPs.Stop()    } catch { }
+            try { $script:icoLockPs.Dispose() } catch { }
+            try { $script:icoLockRs.Dispose() } catch { }
+            $script:icoLockPs = $null; $script:icoLockRs = $null
+        }
+        Remove-Item $script:root -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'skips extra ico copy when icons live inside the bundle (robocopy already handled them)' {
+        # Bundle layout: work_timer.exe + *.ico all in $src (= $binDir).
+        # bundleIco exists → the extra copy loop must be skipped entirely.
+        # To prove nothing extra is attempted: lock dest icons exclusively for the
+        # full duration; if Copy-FileRetry is called it will exhaust retries and
+        # (at minimum) print a warning.  We assert no streams error is thrown.
+        New-SourceTree -Path $script:src
+        # Seed dest with old icons.
+        foreach ($ico in @('Kommen.ico','Gehen.ico','WorkTimer.ico')) {
+            'OLD' | Set-Content (Join-Path $script:dest $ico) -NoNewline
+        }
+        'old' | Out-File (Join-Path $script:dest 'work_timer.exe')
+
+        # Hold all three dest icons locked for longer than Copy-FileRetry max wait.
+        $lockedFiles = @('Kommen.ico','Gehen.ico','WorkTimer.ico') | ForEach-Object {
+            [System.IO.File]::Open(
+                (Join-Path $script:dest $_),
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None)
+        }
+
+        try {
+            # Must complete without error: the extra copy loop is skipped because
+            # bundleIco exists; the lock is irrelevant.
+            { Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts -TimeoutMs 10000 } |
+                Should Not Throw
+        } finally {
+            $lockedFiles | ForEach-Object { $_.Dispose() }
+        }
+    }
+
+    It 'runs extra ico copy when icons live OUTSIDE the bundle directory' {
+        # Bundle layout: exe in $src\work_timer\ subdir; icons only at $src root.
+        # bundleIco does NOT exist → extra copy loop must fire and copy them to $dest.
+        $bundleDir = New-Item -ItemType Directory -Path (Join-Path $script:src 'work_timer') -Force
+        'exe' | Out-File (Join-Path $bundleDir.FullName 'work_timer.exe')
+        foreach ($ico in @('Kommen.ico','Gehen.ico','WorkTimer.ico')) {
+            'ICON_CONTENT' | Set-Content (Join-Path $script:src $ico) -NoNewline
+        }
+
+        Invoke-InstallerWithTimeout $installer $script:src $script:dest -SkipShortcuts -TimeoutMs 30000
+
+        # Icons must have been copied from $src root into $dest.
+        foreach ($ico in @('Kommen.ico','Gehen.ico','WorkTimer.ico')) {
+            $destIco = Join-Path $script:dest $ico
+            (Test-Path $destIco) | Should Be $true
+            [System.IO.File]::ReadAllText($destIco) | Should Be 'ICON_CONTENT'
+        }
+    }
+
+    It 'completes without throwing when extra ico copy exhausts retries (non-fatal warning)' {
+        # Icons outside bundle → extra copy loop fires.
+        # Hold the dest icon locked permanently → Copy-FileRetry exhausts all retries.
+        # The installer must NOT throw — it should warn and continue.
+        $bundleDir = New-Item -ItemType Directory -Path (Join-Path $script:src 'work_timer') -Force
+        'exe' | Out-File (Join-Path $bundleDir.FullName 'work_timer.exe')
+        foreach ($ico in @('Kommen.ico','Gehen.ico','WorkTimer.ico')) {
+            'ICON' | Set-Content (Join-Path $script:src $ico) -NoNewline
+            'OLD'  | Set-Content (Join-Path $script:dest $ico) -NoNewline
+        }
+        'old' | Out-File (Join-Path $script:dest 'work_timer.exe')
+
+        # Lock all dest icons permanently (released in AfterEach).
+        $rs = [runspacefactory]::CreateRunspace(); $rs.Open()
+        $rs.SessionStateProxy.SetVariable('destDir', $script:dest)
+        $ps = [powershell]::Create(); $ps.Runspace = $rs
+        $null = $ps.AddScript({
+            $handles = @('Kommen.ico','Gehen.ico','WorkTimer.ico') | ForEach-Object {
+                [System.IO.File]::Open(
+                    (Join-Path $destDir $_),
+                    [System.IO.FileMode]::Open,
+                    [System.IO.FileAccess]::ReadWrite,
+                    [System.IO.FileShare]::None)
+            }
+            Start-Sleep -Seconds 120
+            $handles | ForEach-Object { $_.Dispose() }
+        })
+        $script:icoLockPs = $ps
+        $script:icoLockRs = $rs
+        $null = $ps.BeginInvoke()
+        Start-Sleep -Milliseconds 200   # ensure locks are held before installer runs
+
+        # Override retries to 2 × 100 ms so the test finishes quickly.
+        # We do this by running a script block that dot-sources the installer
+        # after patching Copy-FileRetry's defaults via $env vars — but the
+        # simplest approach is just accepting the default 20 × 1000ms is too slow
+        # for a unit test.  Instead, run via Invoke-InstallerWithTimeout with a
+        # generous timeout; the installer will warn but MUST NOT throw.
+        # Use a very short Copy-FileRetry window by passing custom retries via
+        # a wrapper: redefine Copy-FileRetry before dot-sourcing.
+        $rs2 = [runspacefactory]::CreateRunspace(); $rs2.Open()
+        $rs2.SessionStateProxy.SetVariable('Ps1',   $installer)
+        $rs2.SessionStateProxy.SetVariable('Src',   $script:src)
+        $rs2.SessionStateProxy.SetVariable('Dest',  $script:dest)
+        $ps2 = [powershell]::Create(); $ps2.Runspace = $rs2
+        $null = $ps2.AddScript({
+            # Patch retries/delay to be tiny so the test doesn't wait 20 s.
+            $env:WT_TEST_ICO_RETRIES  = '2'
+            $env:WT_TEST_ICO_DELAY_MS = '100'
+            & $Ps1 -Source $Src -Dest $Dest -SkipShortcuts
+            Remove-Item Env:\WT_TEST_ICO_RETRIES, Env:\WT_TEST_ICO_DELAY_MS -ErrorAction SilentlyContinue
+        })
+        $handle2 = $ps2.BeginInvoke()
+        $finished = $handle2.AsyncWaitHandle.WaitOne(30000)
+        $finished | Should Be $true   # must not hang
+
+        # Must NOT have thrown a terminating error (only a warning is acceptable).
+        $ps2.HadErrors | Should Be $false
+        $ps2.EndInvoke($handle2) | Out-Null
+        $ps2.Dispose(); $rs2.Dispose()
     }
 }

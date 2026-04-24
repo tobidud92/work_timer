@@ -63,8 +63,8 @@ function Copy-FileRetry {
     param(
         [string]$SrcPath,
         [string]$DestDir,
-        [int]$Retries = 20,
-        [int]$DelayMs = 1000
+        [int]$Retries = $(if ($env:WT_TEST_ICO_RETRIES) { [int]$env:WT_TEST_ICO_RETRIES } else { 20 }),
+        [int]$DelayMs = $(if ($env:WT_TEST_ICO_DELAY_MS) { [int]$env:WT_TEST_ICO_DELAY_MS } else { 1000 })
     )
     $destPath = Join-Path $DestDir (Split-Path $SrcPath -Leaf)
     for ($i = 0; $i -lt $Retries; $i++) {
@@ -247,7 +247,15 @@ if ($robocopyExit -eq -1 -or $robocopyExit -ge 8) {
         $destFile = Join-Path $Dest $rel
         $dir      = Split-Path $destFile -Parent
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        if (-not $_.PSIsContainer) { Copy-Item -Path $_.FullName -Destination $destFile -Force }
+        if (-not $_.PSIsContainer) {
+                try {
+                    Copy-Item -Path $_.FullName -Destination $destFile -Force -ErrorAction Stop
+                } catch {
+                    $copyErr = $_
+                    Write-Warning "Konnte Datei nicht kopieren (gesperrt?): $destFile"
+                    Write-DebugLog "Fallback Copy-Item failed for ${destFile}: $copyErr"
+                }
+            }
     }
     Write-Host ' fertig.'
 } else {
