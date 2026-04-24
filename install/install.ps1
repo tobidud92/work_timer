@@ -83,8 +83,9 @@ function Copy-FileRetry {
                     Write-DebugLog ("Copy locked, retry {0}/{1}: {2}" -f ($i+1), $Retries, $SrcPath)
                     Start-Sleep -Milliseconds $DelayMs
                 } else {
+                    Write-Warning ("Kopieren fehlgeschlagen nach $Retries Versuchen (Datei gesperrt): $SrcPath")
                     Write-DebugLog ("Copy failed after $Retries retries: $SrcPath")
-                    throw
+                    return
                 }
             } else {
                 # Not a locking error – re-throw immediately.
@@ -266,13 +267,16 @@ Write-Host 'Kopiere Icons...' -NoNewline
 # present in $Dest from robocopy are skipped to avoid a redundant overwrite
 # that could race with Explorer re-opening freshly-written .ico files.
 foreach ($ico in @('Kommen.ico', 'Gehen.ico', 'WorkTimer.ico')) {
-    # Only act if robocopy did NOT already deliver this icon.
-    $destIco = Join-Path $Dest $ico
+    $destIco   = Join-Path $Dest   $ico
     $bundleIco = Join-Path $binDir $ico
-    if (-not (Test-Path $destIco) -or -not (Test-Path $bundleIco)) {
-        $found = Get-ChildItem -Path $Source -Filter $ico -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) { Copy-FileRetry -SrcPath $found.FullName -DestDir $Dest }
+    # If robocopy already delivered this icon (it lives inside $binDir), skip.
+    # If the icon is outside the bundle (only at $Source root), copy it now.
+    if (Test-Path $bundleIco) {
+        Write-DebugLog "Icon already in bundle, skipping extra copy: $ico"
+        continue
     }
+    $found = Get-ChildItem -Path $Source -Filter $ico -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) { Copy-FileRetry -SrcPath $found.FullName -DestDir $Dest }
 }
 Write-Host ' fertig.'
 
