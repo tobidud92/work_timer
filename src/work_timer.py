@@ -38,14 +38,18 @@ def _ensure_prompt_toolkit():
         HAVE_PROMPT_TOOLKIT = True
     except Exception as _e:
         _pt_error = _e
-    # Write import failure to a log file so it's diagnosable in packaged runs
-    # (the bare except above would otherwise swallow the error silently).
-    if _pt_error is not None:
+        # Capture traceback while still inside the except block.
         try:
             import traceback as _tb
+            _pt_tb = _tb.format_exc()
+        except Exception:
+            _pt_tb = repr(_e)
+    # Write import failure to a log file so it's diagnosable in packaged runs.
+    if _pt_error is not None:
+        try:
             _dbg = os.path.join(os.environ.get('TEMP', '.'), 'work_timer_pt_error.txt')
             with open(_dbg, 'w', encoding='utf-8') as _f:
-                _f.write(f'prompt_toolkit import failed:\n{_tb.format_exc()}\n')
+                _f.write(f'prompt_toolkit import failed:\n{_pt_tb}\n')
         except Exception:
             pass
     # Allow forcing via env var (useful in packaged runs)
@@ -339,7 +343,14 @@ def input_date(prompt):
                         date_str = _prompt(full_prompt, default=today_display)
                 else:
                     date_str = _prompt(full_prompt, default=today_display)
-            except Exception:
+            except Exception as _pt_call_err:
+                try:
+                    import traceback as _tb2
+                    _dbg2 = os.path.join(os.environ.get('TEMP', '.'), 'work_timer_pt_error.txt')
+                    with open(_dbg2, 'a', encoding='utf-8') as _f2:
+                        _f2.write(f'prompt_toolkit call failed in input_date:\n{_tb2.format_exc()}\n')
+                except Exception:
+                    pass
                 date_str = input(full_prompt)
         else:
             date_str = input(full_prompt)
@@ -660,7 +671,14 @@ def input_time(prompt: str, default: Optional[str] = None) -> str:
                         s = _prompt(full_prompt, default=default)
                 else:
                     s = _prompt(full_prompt, default=default)
-            except Exception:
+            except Exception as _pt_call_err:
+                try:
+                    import traceback as _tb2
+                    _dbg2 = os.path.join(os.environ.get('TEMP', '.'), 'work_timer_pt_error.txt')
+                    with open(_dbg2, 'a', encoding='utf-8') as _f2:
+                        _f2.write(f'prompt_toolkit call failed in input_time:\n{_tb2.format_exc()}\n')
+                except Exception:
+                    pass
                 s = input(full_prompt)
         else:
             s = input(full_prompt)
