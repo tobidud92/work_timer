@@ -37,9 +37,13 @@ if (Test-Path $bundleDir) {
     Write-Warning "Onedir bundle not found at $bundleDir - copied loose EXE files as fallback."
 }
 
-# Copy .ico files from data/ (canonical location)
+# Copy .ico files from data/ into the onedir bundle directory so robocopy
+# handles them during install and the extra ico-copy loop is never triggered.
+# Placing them at $out root would cause the extra loop to fire (bundleIco
+# check fails), making Copy-FileRetry read from an Explorer-locked source.
 $icoPattern = Join-Path $root 'data/*.ico'
-Get-ChildItem -Path $icoPattern -File -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item $_.FullName $out -Force }
+$icoDest = if (Test-Path $bundleDest) { $bundleDest } else { $out }
+Get-ChildItem -Path $icoPattern -File -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item $_.FullName $icoDest -Force }
 
 # Copy optional extras (README/license)
 $extras = @("README.md","docs/README.md")
