@@ -1581,6 +1581,7 @@ def generate_pdf_report():
         ('ALIGN',        (4, 1), (6, -1), 'RIGHT'),
         ('FONTNAME',     (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE',     (0, 0), (-1, -1), 8),
+        ('VALIGN',       (0, 0), (-1, 0), 'MIDDLE'),
         ('GRID',         (0, 0), (-1, -1), 0.5, colors.grey),
         ('LEFTPADDING',  (0, 0), (-1, -1), 4),
         ('RIGHTPADDING', (0, 0), (-1, -1), 4),
@@ -1736,7 +1737,20 @@ def generate_pdf_report():
         story.append(Spacer(1, 0.08 * inch))
 
         # Detailtabelle
-        table_data          = [['Datum', 'Typ', 'Start', 'Ende', 'Dauer (h)', 'Zuschlag / Abzug', 'Tages-Δ']]
+        _h = styles['Normal'].clone('TableHeader')
+        _h.fontSize   = 8
+        _h.fontName   = 'Helvetica-Bold'
+        _h.leading    = 10
+        _h.alignment  = 1  # CENTER
+        table_data = [[
+            Paragraph('Datum', _h),
+            Paragraph('Typ', _h),
+            Paragraph('Start', _h),
+            Paragraph('Ende', _h),
+            Paragraph('Dauer (h)', _h),
+            Paragraph('Zuschlag / Abzug', _h),
+            Paragraph('Tages-\u0394', _h),
+        ]]
         current_table_style = list(table_style_base)
 
         # Detect dates with multiple entries so we can render each interval as its own row
@@ -1835,7 +1849,7 @@ def generate_pdf_report():
                 current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_neg_color))
                 current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
 
-        col_widths = [1.05*inch, 1.05*inch, 0.65*inch, 0.65*inch, 0.75*inch, 0.85*inch, 0.85*inch]
+        col_widths = [1.05*inch, 1.15*inch, 0.62*inch, 0.62*inch, 0.72*inch, 1.0*inch, 0.81*inch]
         table = Table(table_data, colWidths=col_widths)
         table.setStyle(TableStyle(current_table_style))
         story.append(table)
