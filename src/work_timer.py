@@ -6,6 +6,17 @@ import shutil
 import sys
 from typing import Optional
 
+# Force UTF-8 for stdout/stderr so emojis and umlauts don't crash on
+# CP1252 / CP850 consoles (common on German Windows with cmd.exe or
+# a PyInstaller exe started via a desktop shortcut).
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 # Optional interactive prompt support (prompt_toolkit) — imported lazily on first use
 # so that quick actions (--start-now / --end-now) never pay the ~500 ms import cost.
 _prompt = None
@@ -253,7 +264,7 @@ def ensure_user_name():
     """Stellt sicher dass beim ersten Start ein Name hinterlegt wird."""
     config = load_config()
     if not config.get('name', '').strip():
-        print("\n👋 Willkommen beim Arbeitszeittracker!")
+        print("\nWillkommen beim Arbeitszeittracker!")
         print("Bitte hinterlege zunächst deinen Namen für die Reports.")
         name = input("Dein Name: ").strip()
         if name:
