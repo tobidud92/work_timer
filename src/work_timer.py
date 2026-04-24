@@ -17,6 +17,20 @@ try:
 except Exception:
     pass
 
+# Single log file for all runtime errors — cleared on every interactive startup.
+_LOG_FILE = os.path.join(os.environ.get('TEMP', '.'), 'work_timer.log')
+
+def _log_error(section: str, detail: str) -> None:
+    """Append an error entry to _LOG_FILE, silently ignoring any I/O failures."""
+    try:
+        import traceback as _tb_mod
+        # traceback is already formatted by callers; just write the entry.
+        with open(_LOG_FILE, 'a', encoding='utf-8') as _lf:
+            _lf.write(f'[{section}]\n{detail}\n')
+    except Exception:
+        pass
+
+
 # Optional interactive prompt support (prompt_toolkit) — imported lazily on first use
 # so that quick actions (--start-now / --end-now) never pay the ~500 ms import cost.
 _prompt = None
@@ -46,12 +60,7 @@ def _ensure_prompt_toolkit():
             _pt_tb = repr(_e)
     # Write import failure to a log file so it's diagnosable in packaged runs.
     if _pt_error is not None:
-        try:
-            _dbg = os.path.join(os.environ.get('TEMP', '.'), 'work_timer_pt_error.txt')
-            with open(_dbg, 'w', encoding='utf-8') as _f:
-                _f.write(f'prompt_toolkit import failed:\n{_pt_tb}\n')
-        except Exception:
-            pass
+        _log_error('prompt_toolkit import failed', _pt_tb)
     # Allow forcing via env var (useful in packaged runs)
     if os.environ.get('FORCE_PROMPT_TOOLKIT') == '1' and not HAVE_PROMPT_TOOLKIT:
         try:
@@ -346,9 +355,7 @@ def input_date(prompt):
             except Exception as _pt_call_err:
                 try:
                     import traceback as _tb2
-                    _dbg2 = os.path.join(os.environ.get('TEMP', '.'), 'work_timer_pt_error.txt')
-                    with open(_dbg2, 'a', encoding='utf-8') as _f2:
-                        _f2.write(f'prompt_toolkit call failed in input_date:\n{_tb2.format_exc()}\n')
+                    _log_error('prompt_toolkit call failed in input_date', _tb2.format_exc())
                 except Exception:
                     pass
                 date_str = input(full_prompt)
@@ -674,9 +681,7 @@ def input_time(prompt: str, default: Optional[str] = None) -> str:
             except Exception as _pt_call_err:
                 try:
                     import traceback as _tb2
-                    _dbg2 = os.path.join(os.environ.get('TEMP', '.'), 'work_timer_pt_error.txt')
-                    with open(_dbg2, 'a', encoding='utf-8') as _f2:
-                        _f2.write(f'prompt_toolkit call failed in input_time:\n{_tb2.format_exc()}\n')
+                    _log_error('prompt_toolkit call failed in input_time', _tb2.format_exc())
                 except Exception:
                     pass
                 s = input(full_prompt)
@@ -2046,7 +2051,16 @@ def main_menu():
     elif choice == '3':
         calculate_time_balance()
     elif choice == '4':
-        generate_pdf_report()
+        try:
+            generate_pdf_report()
+        except Exception as _report_err:
+            try:
+                import traceback as _tb_r
+                _log_error('generate_pdf_report crashed', _tb_r.format_exc())
+            except Exception:
+                pass
+            print(f'Fehler beim Erstellen des Reports: {_report_err}')
+            print(f'Details wurden gespeichert in: {_LOG_FILE}')
     elif choice == '5':
         edit_work_start()
     elif choice == '6':
@@ -2309,10 +2323,8 @@ if __name__ == "__main__":
             print('prompt_toolkit: OK')
             sys.exit(0)
         else:
-            # Print the error log content if available
-            _dbg = os.path.join(os.environ.get('TEMP', '.'), 'work_timer_pt_error.txt')
-            if os.path.exists(_dbg):
-                with open(_dbg, encoding='utf-8') as _f:
+            if os.path.exists(_LOG_FILE):
+                with open(_LOG_FILE, encoding='utf-8') as _f:
                     print(_f.read())
             else:
                 print('prompt_toolkit: FAILED (no error log)')
@@ -2326,7 +2338,13 @@ if __name__ == "__main__":
         quick_end_action()
         sys.exit(0)
 
-    # Normal interactive run
+    # Normal interactive run — clear the log file from previous session
+    try:
+        if os.path.exists(_LOG_FILE):
+            os.remove(_LOG_FILE)
+    except Exception:
+        pass
+
     ensure_user_name()
     # ensure manual holidays are present in config.json (single source of truth)
     ensure_holidays_in_config()
