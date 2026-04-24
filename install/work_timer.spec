@@ -9,7 +9,7 @@ _EXCLUDES = [
     'tkinter', '_tkinter',
     'unittest', 'doctest', 'pdb', 'profile', 'cProfile', 'timeit',
     'difflib', 'pydoc',
-    'email', 'http', 'xmlrpc',
+    'http', 'xmlrpc',
     'lib2to3', 'distutils', 'ensurepip', 'venv', 'pip',
     'multiprocessing', 'concurrent',
     'sqlite3', '_sqlite3',
