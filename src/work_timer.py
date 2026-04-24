@@ -31,12 +31,23 @@ def _ensure_prompt_toolkit():
     if _prompt_toolkit_initialized:
         return
     _prompt_toolkit_initialized = True
+    _pt_error = None
     try:
         from prompt_toolkit import shortcuts as _pt_shortcuts
         _prompt = _pt_shortcuts.prompt
         HAVE_PROMPT_TOOLKIT = True
-    except Exception:
-        pass
+    except Exception as _e:
+        _pt_error = _e
+    # Write import failure to a log file so it's diagnosable in packaged runs
+    # (the bare except above would otherwise swallow the error silently).
+    if _pt_error is not None:
+        try:
+            import traceback as _tb
+            _dbg = os.path.join(os.environ.get('TEMP', '.'), 'work_timer_pt_error.txt')
+            with open(_dbg, 'w', encoding='utf-8') as _f:
+                _f.write(f'prompt_toolkit import failed:\n{_tb.format_exc()}\n')
+        except Exception:
+            pass
     # Allow forcing via env var (useful in packaged runs)
     if os.environ.get('FORCE_PROMPT_TOOLKIT') == '1' and not HAVE_PROMPT_TOOLKIT:
         try:
