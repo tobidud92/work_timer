@@ -50,6 +50,18 @@ jobs:
           Get-ChildItem dist\work_timer\*.exe | Select-Object Name, @{N='KB';E={[math]::Round($_.Length/1KB)}}
         shell: pwsh
 
+      - name: Smoke test - prompt_toolkit loads in built exe
+        run: |
+          # This step catches PyInstaller exclusion bugs (like excluding 'email' which
+          # importlib.metadata needs) that would silently break the interactive date picker.
+          $result = & dist\work_timer\work_timer.exe --check-prompt-toolkit 2>&1
+          Write-Host $result
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "prompt_toolkit failed to load in the built exe. Check _EXCLUDES in work_timer.spec."
+            exit 1
+          }
+        shell: pwsh
+
       - name: Generate installer folder
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\install\generate_install_folder.ps1 -OutDir WorkTimerInstall -Force
         shell: pwsh

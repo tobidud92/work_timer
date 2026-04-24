@@ -11,7 +11,7 @@ _EXCLUDES = [
     'difflib', 'pydoc',
     'http', 'xmlrpc',
     'lib2to3', 'distutils', 'ensurepip', 'venv', 'pip',
-    'multiprocessing', 'concurrent',
+    'multiprocessing',
     'sqlite3', '_sqlite3',
     'ftplib', 'imaplib', 'smtplib', 'poplib', 'telnetlib',
     'turtle', 'curses', 'readline',

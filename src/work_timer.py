@@ -2288,6 +2288,8 @@ if __name__ == "__main__":
     parser.add_argument('--start-now', action='store_true', help='Record start time now and exit')
     parser.add_argument('--end-now', action='store_true', help='Record end time now and exit')
     parser.add_argument('--log-file', help='Append quick-action events to this logfile')
+    parser.add_argument('--check-prompt-toolkit', action='store_true',
+                        help='Test whether prompt_toolkit loads successfully and exit 0/1')
     parser.add_argument('--mshta-timeout', type=int, help='Timeout in seconds for mshta popups (quick-action notifications)')
     args, _ = parser.parse_known_args()
 
@@ -2299,6 +2301,22 @@ if __name__ == "__main__":
             MSHTA_TIMEOUT = int(args.mshta_timeout)
         except Exception:
             pass
+
+    # Self-test: verify prompt_toolkit loads — used by CI smoke test after build
+    if getattr(args, 'check_prompt_toolkit', False):
+        _ensure_prompt_toolkit()
+        if HAVE_PROMPT_TOOLKIT:
+            print('prompt_toolkit: OK')
+            sys.exit(0)
+        else:
+            # Print the error log content if available
+            _dbg = os.path.join(os.environ.get('TEMP', '.'), 'work_timer_pt_error.txt')
+            if os.path.exists(_dbg):
+                with open(_dbg, encoding='utf-8') as _f:
+                    print(_f.read())
+            else:
+                print('prompt_toolkit: FAILED (no error log)')
+            sys.exit(1)
 
     # If invoked as quick-action, perform and exit before prompting for name/config
     if args.start_now:
