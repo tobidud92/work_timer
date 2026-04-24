@@ -41,31 +41,53 @@ Oder direkt die installierte Exe über den Desktop-Shortcut `WorkTimer` starten.
 
 ## Hauptmenü
 
+Das Hauptmenü verwendet eine interaktive prompt_toolkit-Oberfläche:
+
+- **↑ / ↓** – Menüpunkt navigieren
+- **Zahl** (1–9) – Menüpunkt direkt per Kurzwahl auswählen
+- **Enter** – ausgewählten Punkt bestätigen
+- **Esc** – Beenden
+
 | Taste | Funktion |
 |-------|----------|
 | `1` | Arbeitsbeginn erfassen (jetzt) |
 | `2` | Arbeitsende erfassen (jetzt) |
 | `3` | Zeitsaldo anzeigen |
 | `4` | Report als PDF erstellen |
-| `5` | Arbeitsbeginn korrigieren (korrigieren / nachtragen) |
-| `6` | Arbeitsende korrigieren (korrigieren / nachtragen) |
-| `7` | Einstellungen / Optionen |
-| `8` | Beenden |
+| `5` | Monatsübersicht (interaktiv) |
+| `6` | Arbeitsbeginn korrigieren (korrigieren / nachtragen) |
+| `7` | Arbeitsende korrigieren (korrigieren / nachtragen) |
+| `8` | Einstellungen / Optionen |
+| `9` | Beenden |
 
 ---
 
-## Einstellungen / Optionen (Untermenü 7)
+## Monatsübersicht (Option 5)
+
+| Taste | Funktion |
+|-------|----------|
+| `←` / `→` | Monat wechseln |
+| `↑` / `↓` | Eintrag scrollen |
+| `q` / Esc | Schließen |
+
+Tage ohne Eintrag (Mo–Fr, kein Feiertag) erscheinen als **Fehltag** (rot) mit Tages-Δ = −7,00 h.
+
+---
+
+## Einstellungen / Optionen (Untermenü 8)
+
+Gleiches Bedienkonzept wie das Hauptmenü: ↑/↓ navigieren oder Zahl direkt eingeben.
 
 | Taste | Funktion |
 |-------|----------|
 | `1` | Urlaubstag eintragen |
 | `2` | Feiertag eintragen (speichert in `config.json`) |
 | `3` | Zeitausgleichstag eintragen |
-| `4` | Arbeitsbeginn/Ende korrigieren |
-| `5` | Sonderarbeit erfassen (Sa/So/Feiertag) |
+| `4` | Sonderarbeit erfassen (Sa/So/Feiertag) |
+| `5` | Eintrag löschen |
 | `6` | Feiertage anzeigen (aktuelles Jahr) |
 | `7` | Feiertage aus CSV importieren (`Datum,Name`) |
-| `8` | Config-Backup wiederherstellen |
+| `8` | Feiertage exportieren (CSV) |
 | `9` | Name ändern |
 | `0` | Zurück |
 
