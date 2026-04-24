@@ -63,8 +63,8 @@ function Copy-FileRetry {
     param(
         [string]$SrcPath,
         [string]$DestDir,
-        [int]$Retries = 10,
-        [int]$DelayMs = 500
+        [int]$Retries = 20,
+        [int]$DelayMs = 1000
     )
     $destPath = Join-Path $DestDir (Split-Path $SrcPath -Leaf)
     for ($i = 0; $i -lt $Retries; $i++) {
@@ -253,6 +253,10 @@ if ($robocopyExit -eq -1 -or $robocopyExit -ge 8) {
     Write-Host ' fertig.'
 }
 
+# Give Explorer time to finish re-caching icon thumbnails that robocopy just
+# wrote. Without this pause, Explorer re-acquires the .ico lock immediately
+# after robocopy and Copy-FileRetry hits a lock on the very first attempt.
+Start-Sleep -Milliseconds 2000
 Write-Host 'Kopiere Icons...' -NoNewline
 
 # --- Copy icons not already handled by robocopy ---------------------------
