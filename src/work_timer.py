@@ -1014,6 +1014,9 @@ def compute_day_delta(entry, manually_entered_holidays=None):
                 brutto = float(dauer_str)
             except ValueError:
                 return 0.0, '—', ''
+            if brutto <= 0.0:
+                # 0-duration entry (e.g. start == end): neutral, no saldo impact
+                return 0.0, '—', ''
             netto = calculate_netto_hours(brutto)
             pause_d = BREAK_DURATION_HOURS if brutto > BREAK_THRESHOLD_HOURS else 0.0
             if typ == 'Sonderarbeit' or day_type in ('saturday', 'sunday', 'holiday'):
@@ -1061,13 +1064,35 @@ def compute_saldo(data):
         return None
 
     start_date   = min(all_dates)
+
+    # Build set of dates that have ONLY incomplete entries (Arbeit/Sonderarbeit
+    # with no Dauer). Such days are excluded from Soll — the shift is still open
+    # and should not create an invisible negative saldo contribution.
+    _day_map = {}
+    for _e in data:
+        try:
+            _ed = datetime.strptime(_e['Datum'], DATE_FORMAT_INTERNAL).date()
+            _day_map.setdefault(_ed, []).append(_e)
+        except ValueError:
+            pass
+    incomplete_only_dates = set()
+    for _d, _es in _day_map.items():
+        _has_complete = any(
+            _e.get('Typ') in ('Urlaub', 'Krankheit', 'Feiertag', 'Zeitausgleich')
+            or (_e.get('Typ') in ('Arbeit', 'Sonderarbeit') and _e.get('Dauer', '').strip())
+            for _e in _es
+        )
+        if not _has_complete:
+            incomplete_only_dates.add(_d.strftime(DATE_FORMAT_INTERNAL))
+
     soll_stunden = 0.0
     current      = start_date
 
     while current <= today:
         di = current.strftime(DATE_FORMAT_INTERNAL)
         if current.weekday() < 5:
-            if di not in PUBLIC_HOLIDAYS and di not in combined_holidays:
+            if (di not in PUBLIC_HOLIDAYS and di not in combined_holidays
+                    and di not in incomplete_only_dates):
                 soll_stunden += DAILY_HOURS
         current += timedelta(days=1)
 
@@ -1604,6 +1629,7 @@ def generate_pdf_report():
         'Zeitausgleich':    colors.HexColor('#FFFFE6'),
         'Fehltag':          colors.HexColor('#F5E6E6'),  # light red for missing days
         'Krankheit':        colors.HexColor('#E6F0FF'),  # light blue for sick days
+        'Incomplete':       colors.HexColor('#FFE0B2'),  # light orange for open/incomplete shifts
         'Header':           colors.HexColor('#CCCCCC'),
         'MultiCheckin':     colors.HexColor('#C39BD3'),
         'MultiCheckinLight':colors.HexColor('#E8D5F0'),
@@ -1692,6 +1718,21 @@ def generate_pdf_report():
     story.append(saldo_table)
     story.append(Spacer(1, 0.3 * inch))
 
+    # Pre-compute incomplete-only dates so the monthly Soll loop excludes them
+    # (same logic as compute_saldo: open shifts must not inflate the Soll target).
+    _pdf_day_map = {}
+    for _e in sorted_data:
+        _pdf_day_map.setdefault(_e.get('Datum', ''), []).append(_e)
+    pdf_incomplete_only_dates = set()
+    for _di, _es in _pdf_day_map.items():
+        _has_complete = any(
+            _e.get('Typ') in ('Urlaub', 'Krankheit', 'Feiertag', 'Zeitausgleich')
+            or (_e.get('Typ') in ('Arbeit', 'Sonderarbeit') and _e.get('Dauer', '').strip())
+            for _e in _es
+        )
+        if not _has_complete:
+            pdf_incomplete_only_dates.add(_di)
+
     # ── Monatstabellen ────────────────────────────────────────────
     for month_year in sorted(monthly_data.keys()):
         try:
@@ -1714,7 +1755,8 @@ def generate_pdf_report():
         _cur = _m_rstart
         while _cur <= _m_rend:
             _di = _cur.strftime(DATE_FORMAT_INTERNAL)
-            if _cur.weekday() < 5 and _di not in PUBLIC_HOLIDAYS and _di not in holidays:
+            if (_cur.weekday() < 5 and _di not in PUBLIC_HOLIDAYS and _di not in holidays
+                    and _di not in pdf_incomplete_only_dates):
                 month_soll += DAILY_HOURS
             _cur += timedelta(days=1)
 
@@ -1910,6 +1952,10 @@ def generate_pdf_report():
                 bg_col = type_colors['MultiCheckin'] if is_first_of_date else type_colors['MultiCheckinLight']
             else:
                 bg_col = type_colors.get(day_type_key)
+            # Incomplete entry (open shift: has start but no end) → override with warning color
+            if (day_type_key in ('Arbeit', 'Sonderarbeit')
+                    and not entry.get('Endzeit', '').strip()):
+                bg_col = type_colors['Incomplete']
             if bg_col is not None:
                 current_table_style.append(('BACKGROUND', (0, row_index), (-1, row_index), bg_col))
 
@@ -2342,6 +2388,9 @@ def browse_months():
                             lines.append(('class:sonder', text))
                         elif typ == 'Zeitausgleich':
                             lines.append(('class:zeitaus', text))
+                        elif (typ in ('Arbeit', 'Sonderarbeit')
+                              and not e.get('Endzeit', '').strip()):
+                            lines.append(('class:incomplete', text))
                         else:
                             lines.append(('', text))
                 return lines
@@ -2383,6 +2432,7 @@ def browse_months():
                 'sonder':   'fg:ansimagenta',
                 'zeitaus':  'fg:ansicyan',
                 'krank':    'fg:ansiblue',
+                'incomplete': 'fg:ansibrightyellow bold',
                 'empty':    'italic',
             })
 

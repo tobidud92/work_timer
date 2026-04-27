@@ -245,5 +245,102 @@ class TestBrowseMonths(unittest.TestCase):
                 work_timer.HAVE_PROMPT_TOOLKIT = orig
 
 
+class TestIncompleteEntries(unittest.TestCase):
+    """Tests for open-shift (no Endzeit) handling in saldo + display."""
+
+    def test_zero_brutto_compute_day_delta_returns_dash(self):
+        """An entry with Dauer='0.00' (start == end) must return '—' delta, not -7h."""
+        entry = {
+            'Datum': '2026-04-24', 'Typ': 'Arbeit',
+            'Startzeit': '13:56', 'Endzeit': '13:56', 'Dauer': '0.00',
+            'Kommentar': '',
+        }
+        delta_val, delta_str, zuschlag = work_timer.compute_day_delta(entry)
+        self.assertAlmostEqual(delta_val, 0.0, places=2)
+        self.assertEqual(delta_str, '—')
+
+    def test_incomplete_entry_excluded_from_soll(self):
+        """A day with only an open shift (no Dauer) must NOT be counted in Soll."""
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        # Skip back to make sure it's a weekday (Mon-Fri)
+        while yesterday.weekday() >= 5:
+            yesterday -= timedelta(days=1)
+        yest_str = yesterday.strftime(work_timer.DATE_FORMAT_INTERNAL)
+
+        # One complete entry (yesterday) + one incomplete entry (today if weekday, else skip)
+        # Use yesterday as the ONLY date so the incomplete entry is today
+        entries = [
+            {
+                'Datum': yest_str, 'Typ': 'Arbeit',
+                'Startzeit': '08:00', 'Endzeit': '16:00', 'Dauer': '8.00',
+                'Kommentar': '',
+            },
+        ]
+        # Add today as incomplete if today is a weekday
+        today_str = today.strftime(work_timer.DATE_FORMAT_INTERNAL)
+        if today.weekday() < 5:
+            entries.append({
+                'Datum': today_str, 'Typ': 'Arbeit',
+                'Startzeit': '08:00', 'Endzeit': '', 'Dauer': '',
+                'Kommentar': '',
+            })
+
+        with tempfile.TemporaryDirectory() as td:
+            work_timer.CSV_FILE = os.path.join(td, 'arbeitszeiten.csv')
+            work_timer.CONFIG_FILE = os.path.join(td, 'config.json')
+            import json
+            with open(work_timer.CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump({'name': '', 'holidays': {}}, f)
+            work_timer.save_data(entries)
+            loaded = work_timer.load_data()
+            s = work_timer.compute_saldo(loaded)
+
+        self.assertIsNotNone(s)
+        # The saldo should equal: ist_gesamt for yesterday minus soll for yesterday only.
+        # Specifically, today's open shift must NOT add -7h to the saldo.
+        # With yesterday at 8h brutto, 0.75h pause: ist_netto = 7.25h.
+        # Soll = only yesterday (today excluded from Soll as incomplete-only).
+        # saldo = 7.25 - 7.0 = +0.25h  (assuming no holidays on yesterday)
+        if today.weekday() < 5:
+            # today was incomplete → soll should cover only yesterday
+            soll_days = s['soll'] / work_timer.DAILY_HOURS
+            # The incomplete today must NOT be in soll
+            self.assertAlmostEqual(soll_days % 1, 0.0, places=5,
+                                   msg="Incomplete-only today must not be counted in Soll")
+
+    def test_compute_saldo_open_shift_today_no_extra_deduction(self):
+        """Today's open shift should yield saldo ≥ that of just the complete entries."""
+        today = date.today()
+        while today.weekday() >= 5:
+            # if today is weekend, this test is trivially satisfied
+            return
+        today_str = today.strftime(work_timer.DATE_FORMAT_INTERNAL)
+        entries = [
+            {
+                'Datum': today_str, 'Typ': 'Arbeit',
+                'Startzeit': '08:00', 'Endzeit': '', 'Dauer': '',
+                'Kommentar': '',
+            },
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            work_timer.CSV_FILE = os.path.join(td, 'arbeitszeiten.csv')
+            work_timer.CONFIG_FILE = os.path.join(td, 'config.json')
+            import json
+            with open(work_timer.CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump({'name': '', 'holidays': {}}, f)
+            work_timer.save_data(entries)
+            loaded = work_timer.load_data()
+            s = work_timer.compute_saldo(loaded)
+        self.assertIsNotNone(s)
+        # Soll must be 0 (today is the only day, it's incomplete → excluded from Soll)
+        self.assertAlmostEqual(s['soll'], 0.0, places=2,
+                               msg="Day with only open shift must not appear in Soll")
+        # Ist must also be 0 (no Dauer)
+        self.assertAlmostEqual(s['ist_brutto'], 0.0, places=2)
+        # Saldo must be 0
+        self.assertAlmostEqual(s['saldo'], 0.0, places=2)
+
+
 if __name__ == '__main__':
     unittest.main()

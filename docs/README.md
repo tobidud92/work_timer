@@ -72,6 +72,8 @@ Das Hauptmenü verwendet eine interaktive prompt_toolkit-Oberfläche:
 
 Tage ohne Eintrag (Mo–Fr, kein Feiertag) erscheinen als **Fehltag** (rot) mit Tages-Δ = −7,00 h.
 
+Tage mit einem **offenen Eintrag** (Beginn erfasst, aber noch kein Ende) werden in **Orange** (Monatsübersicht) bzw. **Hellgelb-Orange** (PDF) hervorgehoben und fließen **nicht** in den Soll-Stunden-Zähler ein — sie beeinflussen den Saldo erst, wenn das Arbeitsende nachgetragen wurde.
+
 ---
 
 ## Einstellungen / Optionen (Untermenü 8)
