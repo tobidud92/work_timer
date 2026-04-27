@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write   # required to create GitHub releases and upload assets
+
 jobs:
   release:
     runs-on: windows-latest
