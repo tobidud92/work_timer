@@ -2403,6 +2403,8 @@ def browse_months():
                         typ  = e.get('Typ', '')
                         if i == cursor[0]:
                             lines.append(('class:cursor', '▶' + text[1:]))
+                        elif e.get('_synthetic') and typ == 'Feiertag':
+                            lines.append(('class:feiertag', text))
                         elif e.get('_synthetic'):
                             lines.append(('class:fehltag', text))
                         elif typ == 'Urlaub':
