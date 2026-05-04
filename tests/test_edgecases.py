@@ -96,13 +96,35 @@ class TestFillMissingWeekdays(unittest.TestCase):
         self.assertNotIn(self._d(self.SAT), synth_dates)
         self.assertNotIn(self._d(self.SUN), synth_dates)
 
-    def test_holiday_day_not_inserted(self):
-        """A day marked as holiday must not become a Fehltag."""
+    def test_holiday_day_not_inserted_as_fehltag(self):
+        """A day marked as a manually configured holiday must appear as Feiertag, not Fehltag."""
         holiday_date = self._d(self.TUE)
         entries = [self._entry(self.MON), self._entry(self.WED)]
         result  = self._expand(entries, self.MON, self.WED, holidays={holiday_date})
-        synth_dates = {e['Datum'] for e in result if e.get('_synthetic')}
-        self.assertNotIn(holiday_date, synth_dates)
+        fehltag_dates = {e['Datum'] for e in result if e.get('_synthetic') and e.get('Typ') == 'Fehltag'}
+        feiertag_dates = {e['Datum'] for e in result if e.get('_synthetic') and e.get('Typ') == 'Feiertag'}
+        self.assertNotIn(holiday_date, fehltag_dates, "Holiday must NOT appear as Fehltag")
+        self.assertIn(holiday_date, feiertag_dates, "Holiday must appear as synthetic Feiertag")
+
+    def test_public_holiday_inserted_as_feiertag_with_name(self):
+        """A PUBLIC_HOLIDAYS entry must appear as synthetic Feiertag with the holiday name as Kommentar."""
+        from src.work_timer import PUBLIC_HOLIDAYS
+        from datetime import datetime
+        # Pick the first public holiday that falls on a weekday (Mon-Fri)
+        ph_date_obj = None
+        ph_name = None
+        for d_str, name in sorted(PUBLIC_HOLIDAYS.items()):
+            d = datetime.strptime(d_str, '%Y-%m-%d').date()
+            if d.weekday() < 5:
+                ph_date_obj = d
+                ph_name = name
+                break
+        self.assertIsNotNone(ph_date_obj, "No weekday public holiday found in PUBLIC_HOLIDAYS")
+        # Use the public holiday as the only date in range with no existing entries
+        result = self._expand([], ph_date_obj, ph_date_obj)
+        feiertag_rows = [e for e in result if e.get('_synthetic') and e.get('Typ') == 'Feiertag']
+        self.assertEqual(len(feiertag_rows), 1, "Expected exactly one synthetic Feiertag row")
+        self.assertEqual(feiertag_rows[0]['Kommentar'], ph_name)
 
     def test_existing_entry_not_duplicated(self):
         """A day that already has an entry must not also get a synthetic row."""

@@ -1567,11 +1567,22 @@ def _fill_missing_weekdays(entries_for_month, month_year, holidays, global_start
     cur = range_start
     while cur <= range_end:
         di = cur.strftime(DATE_FORMAT_INTERNAL)
-        if cur.weekday() < 5 and di not in PUBLIC_HOLIDAYS and di not in holidays and di not in existing_dates:
-            synthetic.append({
-                'Datum': di, 'Typ': 'Fehltag', 'Startzeit': '', 'Endzeit': '',
-                'Dauer': '', 'Kommentar': '', '_synthetic': True,
-            })
+        if cur.weekday() < 5 and di not in existing_dates:
+            if di in PUBLIC_HOLIDAYS:
+                synthetic.append({
+                    'Datum': di, 'Typ': 'Feiertag', 'Startzeit': '', 'Endzeit': '',
+                    'Dauer': '', 'Kommentar': PUBLIC_HOLIDAYS[di], '_synthetic': True,
+                })
+            elif di in holidays:
+                synthetic.append({
+                    'Datum': di, 'Typ': 'Feiertag', 'Startzeit': '', 'Endzeit': '',
+                    'Dauer': '', 'Kommentar': '', '_synthetic': True,
+                })
+            else:
+                synthetic.append({
+                    'Datum': di, 'Typ': 'Fehltag', 'Startzeit': '', 'Endzeit': '',
+                    'Dauer': '', 'Kommentar': '', '_synthetic': True,
+                })
         cur += timedelta(days=1)
 
     combined = list(entries_for_month) + synthetic
@@ -1893,18 +1904,31 @@ def generate_pdf_report():
             occ_index = occ_index_for_date.get(di, 0)
             occ_index_for_date[di] = occ_index + 1
 
-            # --- Synthetic Fehltag row (no start/end recorded) ---
+            # --- Synthetic Fehltag/Feiertag row (no start/end recorded) ---
             if entry.get('_synthetic'):
-                delta_val = -DAILY_HOURS
-                delta_str = f'{delta_val:.2f} h'
+                if entry.get('Typ') == 'Feiertag':
+                    delta_val = 0.0
+                    delta_str = '\u00b10.00 h'
+                else:
+                    delta_val = -DAILY_HOURS
+                    delta_str = f'{delta_val:.2f} h'
                 table_data.append([
                     sanitize_for_pdf(to_display(di), max_len=20),
-                    'Fehltag', '', '', '', '', delta_str,
+                    entry.get('Typ', 'Fehltag'),
+                    '',
+                    '',
+                    '',
+                    sanitize_for_pdf(entry.get('Kommentar', ''), max_len=30),
+                    delta_str,
                 ])
                 row_index = len(table_data) - 1
-                current_table_style.append(('BACKGROUND', (0, row_index), (-1, row_index), type_colors['Fehltag']))
-                current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_neg_color))
-                current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
+                if entry.get('Typ') == 'Feiertag':
+                    current_table_style.append(('BACKGROUND', (0, row_index), (-1, row_index), type_colors['Feiertag']))
+                    current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), colors.black))
+                else:
+                    current_table_style.append(('BACKGROUND', (0, row_index), (-1, row_index), type_colors['Fehltag']))
+                    current_table_style.append(('TEXTCOLOR', (6, row_index), (6, row_index), delta_neg_color))
+                    current_table_style.append(('FONTNAME',  (6, row_index), (6, row_index), 'Helvetica-Bold'))
                 continue
 
             multiple_intervals = date_counts.get(di, 0) > 1
@@ -2321,7 +2345,10 @@ def browse_months():
         kom = entry.get('Kommentar', '')
         # delta
         if entry.get('_synthetic'):
-            delta_s = f'{-DAILY_HOURS:.2f} h'
+            if entry.get('Typ') == 'Feiertag':
+                delta_s = '\u00b10.00 h'
+            else:
+                delta_s = f'{-DAILY_HOURS:.2f} h'
         else:
             dv, delta_s, _ = compute_day_delta(entry, holidays)
 
