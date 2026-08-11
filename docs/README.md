@@ -44,25 +44,30 @@ Oder direkt die installierte Exe über den Desktop-Shortcut `WorkTimer` starten.
 Das Hauptmenü verwendet eine interaktive prompt_toolkit-Oberfläche:
 
 - **↑ / ↓** – Menüpunkt navigieren
-- **Zahl** (1–9) – Menüpunkt direkt per Kurzwahl auswählen
+- **Zahl** (1–8) – Menüpunkt direkt per Kurzwahl auswählen
 - **Enter** – ausgewählten Punkt bestätigen
 - **Esc** – Beenden
 
 | Taste | Funktion |
 |-------|----------|
-| `1` | Arbeitsbeginn erfassen (jetzt) |
-| `2` | Arbeitsende erfassen (jetzt) |
-| `3` | Zeitsaldo anzeigen |
-| `4` | Report als PDF erstellen |
-| `5` | Monatsübersicht (interaktiv) |
-| `6` | Arbeitsbeginn korrigieren (korrigieren / nachtragen) |
-| `7` | Arbeitsende korrigieren (korrigieren / nachtragen) |
-| `8` | Einstellungen / Optionen |
-| `9` | Beenden |
+| `1` | Zeitsaldo anzeigen |
+| `2` | Zeitraum auswerten (Soll / Ist) |
+| `3` | Report als PDF erstellen |
+| `4` | Monatsübersicht (interaktiv) |
+| `5` | Urlaub / Gleitzeit / Krankheit eintragen |
+| `6` | Arbeitszeit korrigieren (Beginn / Ende) |
+| `7` | Einstellungen / Optionen |
+| `8` | Beenden |
 
 ---
 
-## Monatsübersicht (Option 5)
+## Zeitraum auswerten (Option 2)
+
+Die Auswertung fragt nach Beginn und Ende eines Zeitraums (jeweils inklusive) und zeigt die Soll- und Ist-Stunden, Pausenabzug, Zuschläge sowie den Saldo für genau diesen Zeitraum an.
+
+---
+
+## Monatsübersicht (Option 4)
 
 | Taste | Funktion |
 |-------|----------|
@@ -76,7 +81,7 @@ Tage mit einem **offenen Eintrag** (Beginn erfasst, aber noch kein Ende) werden 
 
 ---
 
-## Einstellungen / Optionen (Untermenü 8)
+## Einstellungen / Optionen (Untermenü 7)
 
 Gleiches Bedienkonzept wie das Hauptmenü: ↑/↓ navigieren oder Zahl direkt eingeben.
 

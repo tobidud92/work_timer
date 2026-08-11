@@ -6,8 +6,10 @@ class TestDocs(unittest.TestCase):
     def test_readme_contains_new_menu_entries(self):
         with open(os.path.join('docs', 'README.md'), encoding='utf-8') as f:
             readme = f.read()
-        self.assertIn('Arbeitsbeginn korrigieren', readme)
-        self.assertIn('Arbeitsende korrigieren', readme)
+        self.assertIn('Arbeitszeit korrigieren (Beginn / Ende)', readme)
+        self.assertIn('Zeitraum auswerten (Soll / Ist)', readme)
+        self.assertNotIn('Arbeitsbeginn erfassen (jetzt)', readme)
+        self.assertNotIn('Arbeitsende erfassen (jetzt)', readme)
         self.assertIn('Lässt du die Datumseingabe leer', readme)
 
     def test_readme_dev_mentions_date_prefill(self):

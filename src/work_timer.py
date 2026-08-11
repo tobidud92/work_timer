@@ -1045,36 +1045,31 @@ def compute_day_delta(entry, manually_entered_holidays=None):
 
 # --- Zeitsaldo-Berechnung ---
 
-def compute_saldo(data):
-    """Zentrale Saldo-Berechnung, gibt alle Werte als Dict zurück."""
-    today    = date.today()
-    # holidays defined in config.json (mapping date->name) is the single source of truth
+def compute_time_balance_for_period(data, start_date, end_date):
+    """Calculate Soll, Ist and saldo for the inclusive date range provided."""
+    if end_date < start_date:
+        raise ValueError('Das Enddatum darf nicht vor dem Beginndatum liegen.')
+
+    # Holidays defined in config.json (mapping date->name) are the single source of truth.
     cfg = load_config()
     config_holidays_map = cfg.get('holidays', {}) if isinstance(cfg, dict) else {}
     combined_holidays = set(config_holidays_map.keys()) if isinstance(config_holidays_map, dict) else set()
 
-    all_dates = []
+    entries_in_period = []
     for entry in data:
         try:
-            all_dates.append(datetime.strptime(entry['Datum'], DATE_FORMAT_INTERNAL).date())
+            entry_date = datetime.strptime(entry['Datum'], DATE_FORMAT_INTERNAL).date()
         except ValueError:
-            pass
-
-    if not all_dates:
-        return None
-
-    start_date   = min(all_dates)
+            continue
+        if start_date <= entry_date <= end_date:
+            entries_in_period.append((entry, entry_date))
 
     # Build set of dates that have ONLY incomplete entries (Arbeit/Sonderarbeit
     # with no Dauer). Such days are excluded from Soll — the shift is still open
     # and should not create an invisible negative saldo contribution.
     _day_map = {}
-    for _e in data:
-        try:
-            _ed = datetime.strptime(_e['Datum'], DATE_FORMAT_INTERNAL).date()
-            _day_map.setdefault(_ed, []).append(_e)
-        except ValueError:
-            pass
+    for _e, _ed in entries_in_period:
+        _day_map.setdefault(_ed, []).append(_e)
     incomplete_only_dates = set()
     for _d, _es in _day_map.items():
         _has_complete = any(
@@ -1088,7 +1083,7 @@ def compute_saldo(data):
     soll_stunden = 0.0
     current      = start_date
 
-    while current <= today:
+    while current <= end_date:
         di = current.strftime(DATE_FORMAT_INTERNAL)
         if current.weekday() < 5:
             if (di not in PUBLIC_HOLIDAYS and di not in combined_holidays
@@ -1100,13 +1095,7 @@ def compute_saldo(data):
     pausen_abzug     = 0.0
     zuschlag_stunden = 0.0
 
-    for entry in data:
-        try:
-            ed = datetime.strptime(entry['Datum'], DATE_FORMAT_INTERNAL).date()
-        except ValueError:
-            continue
-        if ed > today:
-            continue
+    for entry, _ in entries_in_period:
         typ       = entry.get('Typ', '')
         dauer_str = entry.get('Dauer', '')
 
@@ -1131,7 +1120,7 @@ def compute_saldo(data):
 
     return {
         'start_date':       start_date,
-        'today':            today,
+        'end_date':         end_date,
         'soll':             soll_stunden,
         'ist_brutto':       ist_brutto,
         'pausen_abzug':     pausen_abzug,
@@ -1143,6 +1132,24 @@ def compute_saldo(data):
         'holidays': combined_holidays,
         'holidays_map': config_holidays_map,
     }
+
+
+def compute_saldo(data):
+    """Calculate the balance from the first recorded date through today."""
+    all_dates = []
+    for entry in data:
+        try:
+            all_dates.append(datetime.strptime(entry['Datum'], DATE_FORMAT_INTERNAL).date())
+        except ValueError:
+            pass
+
+    if not all_dates:
+        return None
+
+    today = date.today()
+    result = compute_time_balance_for_period(data, min(all_dates), today)
+    result['today'] = today  # Backwards-compatible key for existing callers.
+    return result
 
 
 def ensure_holidays_in_config():
@@ -1196,6 +1203,41 @@ def calculate_time_balance():
     else:
         print(f"  ❌ SALDO:             {s['saldo']:.2f} h ({saldo_label})")
     print("=" * 52 + "\n")
+
+
+def calculate_time_balance_for_period():
+    """Ask for an inclusive date range and show its Soll and Ist hours."""
+    print('\nZeitraum für die Auswertung eingeben:')
+    start_internal = input_date('Beginn')
+    end_internal = input_date('Ende')
+    try:
+        start_date = datetime.strptime(start_internal, DATE_FORMAT_INTERNAL).date()
+        end_date = datetime.strptime(end_internal, DATE_FORMAT_INTERNAL).date()
+    except ValueError:
+        print('Ungültiges Datum. Abgebrochen.')
+        return
+
+    if end_date < start_date:
+        print('Das Enddatum liegt vor dem Beginndatum. Abgebrochen.')
+        return
+
+    s = compute_time_balance_for_period(load_data(), start_date, end_date)
+    saldo_prefix = '+' if s['saldo'] >= 0 else ''
+    saldo_label = 'Überstunden' if s['saldo'] >= 0 else 'Minusstunden'
+
+    print('\n' + '=' * 52)
+    print('       ZEITRAUM-AUSWERTUNG')
+    print('=' * 52)
+    print(f"  Zeitraum:             {start_date.strftime(DATE_FORMAT_DISPLAY)} – {end_date.strftime(DATE_FORMAT_DISPLAY)}")
+    print(f"  Soll-Stunden:         {s['soll']:.2f} h")
+    print(f"  Ist-Stunden (brutto): {s['ist_brutto']:.2f} h")
+    print(f"  Pausenabzug:         -{s['pausen_abzug']:.2f} h")
+    print(f"  Ist-Stunden (netto):  {s['ist_netto']:.2f} h")
+    if s['zuschlag'] > 0:
+        print(f"  Zuschläge (Sa/So/Ft): +{s['zuschlag']:.2f} h")
+    print('-' * 52)
+    print(f"  SALDO:                {saldo_prefix}{s['saldo']:.2f} h ({saldo_label})")
+    print('=' * 52 + '\n')
 
 # --- Zeiterfassungsfunktionen ---
 
@@ -1252,14 +1294,13 @@ def end_work():
     save_data(data)
 
 def add_special_day(day_type):
-    data          = load_data()
-    date_internal = input_date(f"Datum für {day_type} eingeben")
-    date_display  = to_display(date_internal)
-    comment       = input(f"Kommentar für {day_type} (optional): ")[:MAX_COMMENT_LEN]
-    existing      = get_entry_by_date(data, date_internal)
+    data = load_data()
 
     # For Feiertag: only update the config.json mapping (single source of truth)
     if day_type == 'Feiertag':
+        date_internal = input_date(f"Datum für {day_type} eingeben")
+        date_display = to_display(date_internal)
+        comment = input(f"Kommentar für {day_type} (optional): ")[:MAX_COMMENT_LEN]
         cfg = load_config()
         if not isinstance(cfg, dict):
             cfg = {'name': '', 'holidays': {}}
@@ -1273,10 +1314,10 @@ def add_special_day(day_type):
 
     # Otherwise handle special day types that are stored in the CSV
     if day_type in ('Urlaub', 'Krankheit'):
-        # For vacation allow entering a range: start and end
-        print('Urlaubszeitraum eingeben:')
-        start_internal = input_date('Urlaubsbeginn')
-        end_internal = input_date('Urlaubsende')
+        print(f'{day_type}zeitraum eingeben:')
+        start_internal = input_date(f'{day_type}beginn')
+        end_internal = input_date(f'{day_type}ende')
+        comment = input(f"Kommentar für {day_type} (optional): ")[:MAX_COMMENT_LEN]
         try:
             start_dt = datetime.strptime(start_internal, DATE_FORMAT_INTERNAL).date()
             end_dt = datetime.strptime(end_internal, DATE_FORMAT_INTERNAL).date()
@@ -1380,6 +1421,10 @@ def add_special_day(day_type):
         return
 
     # Zeitausgleich and other single-day types: existing behaviour
+    date_internal = input_date(f"Datum für {day_type} eingeben")
+    date_display = to_display(date_internal)
+    comment = input(f"Kommentar für {day_type} (optional): ")[:MAX_COMMENT_LEN]
+    existing = get_entry_by_date(data, date_internal)
     if existing:
         if not ask_yes(f"Für {date_display} existiert bereits ein Eintrag vom Typ '{existing['Typ']}'. Überschreiben? (j/n): "):
             print("Vorgang abgebrochen.")
@@ -2538,25 +2583,22 @@ def correct_work_time():
 
 def main_menu():
     _MAIN_ITEMS = [
-        ('1', 'Arbeitsbeginn erfassen (jetzt)'),
-        ('2', 'Arbeitsende erfassen (jetzt)'),
-        ('3', 'Zeitsaldo anzeigen'),
-        ('4', 'Report als PDF erstellen'),
-        ('5', 'Monatsübersicht (interaktiv)'),
-        ('6', 'Urlaub / Gleitzeit / Krankheit eintragen'),
-        ('7', 'Arbeitszeit korrigieren (Beginn / Ende)'),
-        ('8', 'Einstellungen / Optionen'),
-        ('9', 'Beenden'),
+        ('1', 'Zeitsaldo anzeigen'),
+        ('2', 'Zeitraum auswerten (Soll / Ist)'),
+        ('3', 'Report als PDF erstellen'),
+        ('4', 'Monatsübersicht (interaktiv)'),
+        ('5', 'Urlaub / Gleitzeit / Krankheit eintragen'),
+        ('6', 'Arbeitszeit korrigieren (Beginn / Ende)'),
+        ('7', 'Einstellungen / Optionen'),
+        ('8', 'Beenden'),
     ]
     choice = _interactive_menu('Work Timer – Hauptmenü', _MAIN_ITEMS)
 
     if choice == '1':
-        start_work()
-    elif choice == '2':
-        end_work()
-    elif choice == '3':
         calculate_time_balance()
-    elif choice == '4':
+    elif choice == '2':
+        calculate_time_balance_for_period()
+    elif choice == '3':
         try:
             generate_pdf_report()
         except Exception as _report_err:
@@ -2567,15 +2609,15 @@ def main_menu():
                 pass
             print(f'Fehler beim Erstellen des Reports: {_report_err}')
             print(f'Details wurden gespeichert in: {_LOG_FILE}')
-    elif choice == '5':
+    elif choice == '4':
         browse_months()
-    elif choice == '6':
+    elif choice == '5':
         add_absence_day()
-    elif choice == '7':
+    elif choice == '6':
         correct_work_time()
-    elif choice == '8':
+    elif choice == '7':
         settings_menu()
-    elif choice == '9' or choice == '':
+    elif choice == '8' or choice == '':
         print("Auf Wiedersehen!")
         return False
     else:

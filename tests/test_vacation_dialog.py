@@ -29,12 +29,11 @@ def test_vacation_range_overwrite_all(tmp_path, monkeypatch):
     monkeypatch.setattr(wt, '_prompt', None)
 
     # sequence of inputs:
-    # 1) Datum für Urlaub (ignored for range but required by function)
-    # 2) Kommentar
-    # 3) Urlaubsbeginn
-    # 4) Urlaubsende
-    # 5) Wahl: 'a' = Alle überschreiben (soft conflicts)
-    inputs = iter(['20.04.2026', 'Test Urlaub', '20.04.2026', '22.04.2026', 'a'])
+    # 1) Urlaubsbeginn
+    # 2) Urlaubsende
+    # 3) Kommentar
+    # 4) Wahl: 'a' = Alle überschreiben (soft conflicts)
+    inputs = iter(['20.04.2026', '22.04.2026', 'Test Urlaub', 'a'])
     monkeypatch.setattr(builtins, 'input', lambda prompt='': next(inputs))
 
     # run the interactive function
@@ -76,7 +75,7 @@ def test_vacation_range_per_day_choice(tmp_path, monkeypatch):
     monkeypatch.setattr(wt, '_prompt', None)
 
     # choose per-day prompt ('e') and answer 'y' to overwrite the soft conflict on 2026-04-21
-    inputs = iter(['20.04.2026', 'Test Urlaub', '20.04.2026', '22.04.2026', 'e', 'y'])
+    inputs = iter(['20.04.2026', '22.04.2026', 'Test Urlaub', 'e', 'y'])
     import builtins
     monkeypatch.setattr(builtins, 'input', lambda prompt='': next(inputs))
 
@@ -112,7 +111,7 @@ def test_vacation_range_skip_soft_conflicts(tmp_path, monkeypatch):
     monkeypatch.setattr(wt, '_prompt', None)
 
     # choose 'n' to not overwrite soft conflicts
-    inputs = iter(['20.04.2026', 'Test Urlaub', '20.04.2026', '22.04.2026', 'n'])
+    inputs = iter(['20.04.2026', '22.04.2026', 'Test Urlaub', 'n'])
     import builtins
     monkeypatch.setattr(builtins, 'input', lambda prompt='': next(inputs))
 
